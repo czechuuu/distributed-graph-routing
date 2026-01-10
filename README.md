@@ -1,0 +1,89 @@
+# Distributed Graph Routing
+
+Dataflow job for distributed graph routing preprocessing. This pipeline processes graph shards in parallel to compute shortcuts (shortest paths between boundary nodes) and prepares the data for BigTable.
+
+## Prerequisites
+
+-   Python 3.8+
+-   Google Cloud SDK (`gcloud`) configured with your project.
+
+## Installation
+
+To install the project dependencies for development and testing:
+
+```bash
+# Recommended: Create a virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install the package in editable mode (CRITICAL for test discovery)
+pip install -e ".[gcp]"
+```
+
+## Running Tests
+
+Once dependencies are installed, you can run the unit tests:
+
+```bash
+# Run all tests
+python3 -m unittest discover tests
+
+# Run shared component tests
+python3 -m unittest tests/common/test_algo.py
+
+# Run contraction pipeline tests
+python3 -m unittest tests/pipeline/test_pipeline.py
+```
+
+## Running the Pipeline
+
+To run the Dataflow job (requires GCP authentication):
+
+1.  Authenticate locally:
+    ```bash
+    gcloud auth application-default login
+    ```
+
+2.  Run the pipeline script:
+    ```bash
+    python3 contractions/main.py \
+      --project YOUR_PROJECT_ID \
+      --temp_location gs://YOUR_BUCKET/temp \
+      --input_nodes_table PROJECT:DATASET.nodes \
+      --input_edges_table PROJECT:DATASET.edges \
+      --bt_instance YOUR_BT_INSTANCE \
+      --shortcuts_table shortcuts \
+      --intra_table intra_edges
+    ```
+
+## Deploying to Dataflow
+
+To run the job on the Dataflow service (instead of locally), append the `Runner` and `Region` arguments:
+
+```bash
+python3 contractions/main.py \
+  --project YOUR_PROJECT_ID \
+  --temp_location gs://YOUR_BUCKET/temp \
+  --staging_location gs://YOUR_BUCKET/staging \
+  --input_nodes_table PROJECT:DATASET.nodes \
+  --input_edges_table PROJECT:DATASET.edges \
+  --bt_instance YOUR_BT_INSTANCE \
+  --shortcuts_table shortcuts \
+  --intra_table intra_edges \
+  --runner DataflowRunner \
+  --region us-central1 \
+  --setup_file ./setup.py
+```
+
+Ensure you have:
+1.  Enabled the Dataflow API.
+2.  Created the GCS buckets for temp/staging.
+3.  Authenticated with `gcloud auth application-default login`.
+
+## Project Structure
+
+-   `shared/`: Common code (models, graph algos) usable by both Dataflow and Serving components.
+-   `contractions/`: Dataflow-specific code (pipeline, main, IO).
+-   `setup.py`: Package configuration.
+-   `DESIGN_DOC.md`: High-level system design.
+-   `PROJECT_STATEMENT.md`: Problem definition.

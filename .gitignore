@@ -30,3 +30,7 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+.venv/
+distributed_graph_routing.egg-info/
+__pycache__
