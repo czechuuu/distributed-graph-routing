@@ -100,6 +100,18 @@ class CreateMutations(beam.DoFn):
             yield direct_row
 
 def create_pipeline(project, temp_location, input_nodes, input_edges, instance, shortcuts_table, intra_table, pipeline_args=None):
+    if pipeline_args is None:
+        pipeline_args = []
+
+    # Automatically enable Cloud Build for DataflowRunner if not explicitly set
+    # This prevents installing dependencies on every worker boot, speeding up scaling.
+    is_dataflow = any('DataflowRunner' in arg for arg in pipeline_args)
+    if is_dataflow:
+        pipeline_args.append('--prebuild_sdk_container_engine=cloud_build')
+        pipeline_args.append(f'--docker_registry_push_url=gcr.io/{project}/dataflow/graph-routing-worker-sdk')
+        pipeline_args.append('--experiments=use_runner_v2')
+        pipeline_args.append(f'--sdk_container_image=docker.io/apache/beam_python3.10_sdk:{beam.version.__version__}')
+
     # Initialize PipelineOptions with passed args (e.g. --runner, --region) using flags argument.
     options = PipelineOptions(flags=pipeline_args)
     options.view_as(SetupOptions).save_main_session = True

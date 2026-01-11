@@ -56,3 +56,17 @@ cbt createtable intra_edges
 cbt createfamily shortcuts cf
 cbt createfamily intra_edges cf
 ```
+5. I added GCP permissions to build docker images and push them to gcr - it's usefule for the dataflow job so that when scaling the new workers don't need to build the dependencies.
+```
+gcloud services enable cloudbuild.googleapis.com
+gcloud services enable containerregistry.googleapis.com
+```
+```
+PROJECT=$(gcloud config get-value project)
+NUM=$(gcloud projects describe $PROJECT --format='value(projectNumber)')
+
+# Grant Cloud Build permission to act as Editor (simplest for prototyping)
+gcloud projects add-iam-policy-binding $PROJECT \
+    --member="serviceAccount:${NUM}@cloudbuild.gserviceaccount.com" \
+    --role="roles/editor"
+```
