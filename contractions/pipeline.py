@@ -3,6 +3,7 @@ import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions, GoogleCloudOptions
 from google.cloud.bigtable import row
 import struct
+from serving_layer import bigtable_storage_pb2
 
 from contractions.io_wrappers import ReadNodesFromBQ, ReadEdgesFromBQ, WriteToBT
 from shared.model import Node, Edge
@@ -61,7 +62,7 @@ class MutationType(Enum):
 
 class CreateMutations(beam.DoFn):
     def __init__(self, table_type):
-        self.table_type = table_type # MutationType.SHORTCUT or MutationType.INTRA
+        self.table_type = table_type
 
     def process(self, element):
         if self.table_type == MutationType.SHORTCUT:
@@ -69,16 +70,32 @@ class CreateMutations(beam.DoFn):
             row_key = f"{shard_id}".encode('utf-8')
             direct_row = row.DirectRow(row_key)
             
-            # Serialize Shortcuts
-            # TODO(mrolbiecki) - use protobufs
-            import json
-            shortcuts_json = json.dumps([s._asdict() for s in shortcuts])
-            direct_row.set_cell('cf', 'shortcuts', shortcuts_json.encode('utf-8'))
+            # --- 1. Write Shortcuts as Protobuf ---
+            overlay_proto = bigtable_storage_pb2.OverlayGraph()
+            
+            for s in shortcuts:
+                
+                pb_edge = overlay_proto.shortcuts.add()
+                pb_edge.from_node_id = s.u
+                pb_edge.to_node_id = s.v
+                pb_edge.weight = int(s.weight) 
+                if s.path:
+                    pb_edge.path.extend(s.path)
+            
+            # Serialize and write
+            serialized_shortcuts = overlay_proto.SerializeToString()
+            direct_row.set_cell('cf', 'shortcuts_proto', serialized_shortcuts)
     
-            # Serialize inter-shard edges not covered by shortcuts
-            # (e.g. boundary edges connecting to other shards)
-            inter_shard_edges_json = json.dumps([e._asdict() for e in inter_shard_edges])
-            direct_row.set_cell('cf', 'inter_shard_edges', inter_shard_edges_json.encode('utf-8'))  
+            # --- 2. Write Inter-shard Edges ---
+            # Use OverlayGraph.bridges
+            bridges_proto = bigtable_storage_pb2.OverlayGraph()
+            for e in inter_shard_edges:
+                pb_edge = bridges_proto.bridges.add()
+                pb_edge.from_node_id = e.u
+                pb_edge.to_node_id = e.v
+                pb_edge.weight = int(e.weight)
+            
+            direct_row.set_cell('cf', 'inter_edges_proto', bridges_proto.SerializeToString())
 
             yield direct_row
 
@@ -87,16 +104,20 @@ class CreateMutations(beam.DoFn):
             row_key = f"{shard_id}".encode('utf-8')
             direct_row = row.DirectRow(row_key)
             
-            # TODO(mrolbiecki) - use protobufs
-            intra_edges = []
+            # --- 3. Write Intra-shard Edges (ShardGraph) ---
+            shard_proto = bigtable_storage_pb2.ShardGraph()
+            
             for u, v, d in G.edges(data=True):
+                # Filtrujemy tylko wewnętrzne krawędzie
                 u_node = G.nodes[u]
                 v_node = G.nodes[v]
                 if u_node.get('shard_id') == shard_id and v_node.get('shard_id') == shard_id:
-                     intra_edges.append({'u': u, 'v': v, 'w': d['weight']})
+                     pb_edge = shard_proto.edges.add()
+                     pb_edge.from_node_id = u
+                     pb_edge.to_node_id = v
+                     pb_edge.weight = int(d['weight'])
             
-            import json
-            direct_row.set_cell('cf', 'edges', json.dumps(intra_edges).encode('utf-8'))
+            direct_row.set_cell('cf', 'shard_graph_proto', shard_proto.SerializeToString())
             yield direct_row
 
 def create_pipeline(project, temp_location, input_nodes, input_edges, instance, shortcuts_table, intra_table, pipeline_args=None):

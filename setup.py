@@ -8,5 +8,5 @@ setuptools.setup(
         'apache-beam[gcp]',
         'networkx>=2.5',
     ],
-    packages=['shared', 'contractions'],
+    packages=['shared', 'contractions', 'serving_layer'],
 )

@@ -21,6 +21,8 @@ message Edge {
     fixed64 to_node_id = 2;
     uint32 weight = 3;
     bool bidirectional = 4;
+    repeated fixed64 path = 5 [packed = true];
+
 }
 
 message NodeLocation {
