@@ -10,22 +10,19 @@ from shared.algo import build_shard_graph, identify_boundary_nodes, compute_shor
 
 from enum import Enum
 
-class AssignShardsToEdge(beam.DoFn):
-    def process(self, element, nodes_side_input):
+class EmitShardsForEdge(beam.DoFn):
+    def process(self, element):
         """
-        Takes an edge and a side input of nodes mapped to their shards.
-        Yields out (shard_id, edge) pairs.
+        Takes (edge, shard_u, shard_v)
+        Yields out (shard_id, edge)
         """
-        edge = element
-        shard_u = nodes_side_input.get(edge.u)
-        shard_v = nodes_side_input.get(edge.v)
+        edge, shard_u, shard_v = element
         
         if shard_u is None or shard_v is None:
-            print(f"Edge {edge} has missing shards: {shard_u}, {shard_v}")
             return
 
         yield (shard_u, edge)
-        
+
         if shard_u != shard_v:
             yield (shard_v, edge)
 
@@ -118,21 +115,63 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
         nodes = p | "ReadNodes" >> ReadNodesFromBQ(input_nodes)
         edges = p | "ReadEdges" >> ReadEdgesFromBQ(input_edges)
         
-        # Prepare Side Input for Shard Mapping using View.AsDict
-        node_shards = (
-            nodes 
-            | beam.Map(lambda n: (n.id, n.shard_id))
-        )
-        node_map = beam.pvalue.AsDict(node_shards)
+        # (NodeID, ShardID)
+        node_id_shard = nodes | "KeyNodesById" >> beam.Map(lambda n: (n.id, n.shard_id))
         
-        # (shard_id, edge) pairs
+        # (Edge.u, Edge)
+        edges_keyed_by_u = edges | "KeyEdgesByU" >> beam.Map(lambda e: (e.u, e))
+        
+        def attach_shard_u(element):
+            """
+            Takes co-grouped
+            (Edge.u, {node_id_shard: [ShardID], edges_u: [Edge]}),
+            Yields (Edge.v, (Edge, ShardU))
+            """
+            node_id, data = element
+            shard_ids = data['node_id_shard']
+            edge_list = data['edges_u']
+            if not shard_ids:
+                return
+            shard_u = shard_ids[0]
+            for e in edge_list:
+                yield (e.v, (e, shard_u))
+
+        # (Edge.v, (Edge, shard_u))
+        edges_with_u_shard = (
+            {'node_id_shard': node_id_shard, 'edges_u': edges_keyed_by_u}
+            | "GroupEdgesAndNodesByU" >> beam.CoGroupByKey()
+            | "AttachShardU" >> beam.FlatMap(attach_shard_u)
+        )
+        
+        def attach_shard_v(element):
+            """
+            Takes co-grouped
+            (Edge.v, {node_id_shard: [ShardID], edges_with_u: [(edge, shard_u)]})
+            Yields (Edge, shard_u, shard_v)
+            """
+            node_id, data = element
+            shard_ids = data['node_id_shard']
+            edges_data = data['edges_with_u']
+            if not shard_ids:
+                return  
+            shard_v = shard_ids[0]
+            for (e, shard_u) in edges_data:
+                yield (e, shard_u, shard_v)
+                
+        edges_with_shards = (
+            {'node_id_shard': node_id_shard, 'edges_with_u': edges_with_u_shard}
+            | "GroupEdgesAndNodesByV" >> beam.CoGroupByKey()
+            | "AttachShardV" >> beam.FlatMap(attach_shard_v)
+        )
+        
+        # (shard_id, edge)
         assigned_edges = (
             edges 
-            | beam.ParDo(AssignShardsToEdge(), nodes_side_input=node_map)
+            | beam.ParDo(EmitShardsForEdge(), nodes_side_input=node_map)
         )
         
         # (shard_id, node) pairs
-        nodes_by_shard = nodes | beam.Map(lambda n: (n.shard_id, n))
+        nodes_by_shard = nodes | "KeyNodesById" >> beam.Map(lambda n: (n.shard_id, n))
         
         # (shard_id, (nodes, edges)) pairs
         grouped = (

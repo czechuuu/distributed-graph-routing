@@ -1,28 +1,29 @@
 import unittest
 import apache_beam as beam
 from shared.model import Node, Edge
-from contractions.pipeline import AssignShardsToEdge, ProcessShard
+from contractions.pipeline import EmitShardsForEdge, ProcessShard
 
 class TestLogic(unittest.TestCase):
 
-    def test_assign_shards(self):
+    def test_emit_shards(self):
         # Nodes: 1 (Shard 1), 2 (Shard 1), 3 (Shard 2)
         # Edges: 1->2 (Internal), 1->3 (Boundary), 3->1 (Boundary incoming)
         
-        nodes_map = {1: 1, 2: 1, 3: 2}
-        dofn = AssignShardsToEdge()
+        dofn = EmitShardsForEdge()
         
         # Test 1->2 (Internal to Shard 1)
+        # Input: (Edge, ShardU=1, ShardV=1)
         # Should emit (1, Edge)
         e1 = Edge(1, 2, 1.0)
-        out1 = list(dofn.process(e1, nodes_map))
+        out1 = list(dofn.process((e1, 1, 1)))
         self.assertEqual(len(out1), 1)
         self.assertEqual(out1[0][0], 1) # Shard 1
         
         # Test 1->3 (Boundary: U=1(S1), V=3(S2))
+        # Input: (Edge, ShardU=1, ShardV=2)
         # Should emit (1, Edge) AND (2, Edge)
         e2 = Edge(1, 3, 2.0)
-        out2 = list(dofn.process(e2, nodes_map))
+        out2 = list(dofn.process((e2, 1, 2)))
         self.assertEqual(len(out2), 2)
         shards = sorted([x[0] for x in out2])
         self.assertEqual(shards, [1, 2])
