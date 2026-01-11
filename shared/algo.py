@@ -50,6 +50,7 @@ def compute_shortcuts(graph: nx.DiGraph, in_nodes: Set[int], out_nodes: Set[int]
             continue
             
         try:
+            # TODO (mkasprzak): calculate paths so they can be saved to BT
             # Dijkstra returns lengths to all reachable nodes
             lengths = nx.single_source_dijkstra_path_length(graph, src, weight='weight')
             
