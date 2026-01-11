@@ -46,12 +46,12 @@ To run the Dataflow job (requires GCP authentication):
 
 2.  Run the pipeline script:
     ```bash
-    python3 contractions/main.py \
-      --project YOUR_PROJECT_ID \
-      --temp_location gs://YOUR_BUCKET/temp \
-      --input_nodes_table PROJECT:DATASET.nodes \
-      --input_edges_table PROJECT:DATASET.edges \
-      --bt_instance YOUR_BT_INSTANCE \
+  python3 contractions/main.py \
+      --project repetitive-shortest-paths \
+      --temp_location gs://repetitive_shortest_paths_contractions_dataflow/temp \
+      --input_nodes_table repetitive-shortest-paths:graph_data.nodes \
+      --input_edges_table repetitive-shortest-paths:graph_data.edges \
+      --bt_instance routing-instance \
       --shortcuts_table shortcuts \
       --intra_table intra_edges
     ```
@@ -62,12 +62,12 @@ To run the job on the Dataflow service (instead of locally), append the `Runner`
 
 ```bash
 python3 contractions/main.py \
-  --project YOUR_PROJECT_ID \
-  --temp_location gs://YOUR_BUCKET/temp \
-  --staging_location gs://YOUR_BUCKET/staging \
-  --input_nodes_table PROJECT:DATASET.nodes \
-  --input_edges_table PROJECT:DATASET.edges \
-  --bt_instance YOUR_BT_INSTANCE \
+  --project repetitive-shortest-paths \
+  --temp_location gs://repetitive_shortest_paths_contractions_dataflow/temp \
+  --staging_location gs://repetitive_shortest_paths_contractions_dataflow/staging \
+  --input_nodes_table repetitive-shortest-paths:graph_data.nodes \
+  --input_edges_table repetitive-shortest-paths:graph_data.edges \
+  --bt_instance routing-instance \
   --shortcuts_table shortcuts \
   --intra_table intra_edges \
   --runner DataflowRunner \

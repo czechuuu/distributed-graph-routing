@@ -166,12 +166,12 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
         
         # (shard_id, edge)
         assigned_edges = (
-            edges 
-            | beam.ParDo(EmitShardsForEdge(), nodes_side_input=node_map)
+            edges_with_shards 
+            | beam.ParDo(EmitShardsForEdge())
         )
         
         # (shard_id, node) pairs
-        nodes_by_shard = nodes | "KeyNodesById" >> beam.Map(lambda n: (n.shard_id, n))
+        nodes_by_shard = nodes | "KeyNodesByShardId" >> beam.Map(lambda n: (n.shard_id, n))
         
         # (shard_id, (nodes, edges)) pairs
         grouped = (
