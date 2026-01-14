@@ -70,7 +70,7 @@ class CreateMutations(beam.DoFn):
             row_key = f"{shard_id}".encode('utf-8')
             direct_row = row.DirectRow(row_key)
             
-            # --- 1. Write Shortcuts as Protobuf ---
+            # Write Shortcuts as Protobuf
             overlay_proto = bigtable_storage_pb2.OverlayGraph()
             
             for s in shortcuts:
@@ -86,7 +86,7 @@ class CreateMutations(beam.DoFn):
             serialized_shortcuts = overlay_proto.SerializeToString()
             direct_row.set_cell('cf', 'shortcuts_proto', serialized_shortcuts)
     
-            # --- 2. Write Inter-shard Edges ---
+            # Write Inter-shard Edges
             # Use OverlayGraph.bridges
             bridges_proto = bigtable_storage_pb2.OverlayGraph()
             for e in inter_shard_edges:
@@ -104,11 +104,11 @@ class CreateMutations(beam.DoFn):
             row_key = f"{shard_id}".encode('utf-8')
             direct_row = row.DirectRow(row_key)
             
-            # --- 3. Write Intra-shard Edges (ShardGraph) ---
+            # Write Intra-shard Edges (ShardGraph)
             shard_proto = bigtable_storage_pb2.ShardGraph()
             
             for u, v, d in G.edges(data=True):
-                # Filtrujemy tylko wewnętrzne krawędzie
+                # Filter only internal edges
                 u_node = G.nodes[u]
                 v_node = G.nodes[v]
                 if u_node.get('shard_id') == shard_id and v_node.get('shard_id') == shard_id:

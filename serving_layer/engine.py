@@ -1,6 +1,9 @@
+import logging
 import networkx as nx
 from typing import List, Dict
 from serving_layer.graph_facade import GraphFacade
+
+logger = logging.getLogger("RoutingEngine")
 
 def find_shortest_path(facade: GraphFacade, start_node: int, end_node: int, node_to_shard: Dict[int, int]) -> List[int]:
     """
@@ -14,18 +17,19 @@ def find_shortest_path(facade: GraphFacade, start_node: int, end_node: int, node
     try:
         graph = facade.get_query_graph(start_node, end_node, node_to_shard)
     except ValueError as e:
-        print(f"Routing Error: {e}")
+        logger.error(f"Routing Error: {e}")
         return []
 
     # Pathfinding
     try:
         path = nx.bidirectional_dijkstra(graph, start_node, end_node, weight='weight')[1]
-        print(f"Raw Path found: {path}")
+        path = nx.bidirectional_dijkstra(graph, start_node, end_node, weight='weight')[1]
+        logger.debug(f"Raw Path found: {path}")
     except nx.NetworkXNoPath:
-        print("No path found.")
+        logger.info("No path found.")
         return []
     except Exception as e:
-        print(f"Pathfinding failed: {e}")
+        logger.error(f"Pathfinding failed: {e}")
         return []
 
     # Path Reconstruction (Unpacking Shortcuts)
@@ -49,7 +53,7 @@ def unpack_path(path_nodes: List[int], facade: GraphFacade) -> List[int]:
         
         # Check if (u, v) is a shortcut known to the facade
         if (u, v) in facade.shortcut_expansions:
-            print(f"Unpacking shortcut {u}->{v}...")
+            logger.debug(f"Unpacking shortcut {u}->{v}...")
             # Expansion path includes u and v: [u, x, y, z, v]
             expansion = facade.shortcut_expansions[(u, v)]
             

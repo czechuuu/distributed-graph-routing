@@ -1,4 +1,7 @@
+import logging
 import networkx as nx
+
+logger = logging.getLogger("GraphFacade")
 
 try:
     from google.cloud import bigtable
@@ -6,13 +9,13 @@ try:
 except ImportError:
     bigtable = None
     row_filters = None
-    print("Warning: google-cloud-bigtable not installed. Only mock mode will work.")
+    logger.warning("google-cloud-bigtable not installed. Only mock mode will work.")
 from typing import Dict, List, Tuple
 
 from serving_layer import bigtable_storage_pb2
 
 class GraphFacade:
-    def __init__(self, project_id: str, instance_id: str, overlay_table_id: str, intra_table_id: str, use_mock: bool = True):
+    def __init__(self, project_id: str, instance_id: str, overlay_table_id: str, intra_table_id: str, use_mock: bool = False):
         self.use_mock = use_mock
         self.overlay = nx.DiGraph()
         self.shortcut_expansions: Dict[Tuple[int, int], List[int]] = {}
@@ -25,11 +28,11 @@ class GraphFacade:
             
             self._load_overlay_graph()
         else:
-            print("GraphFacade initialized in mock mode.")
+            logger.info("GraphFacade initialized in mock mode.")
 
     def _load_overlay_graph(self):
         """Loads Overlay using Pure Protobuf."""
-        print("Loading Overlay Graph from Bigtable (Protobuf)...")
+        logger.info("Loading Overlay Graph from Bigtable (Protobuf)...")
         try:
             rows = self.overlay_table.read_rows()
             for row in rows:
@@ -64,10 +67,10 @@ class GraphFacade:
                     for edge in bridges_pb.bridges:
                         self.overlay.add_edge(edge.from_node_id, edge.to_node_id, weight=edge.weight)
                         
-            print(f"Overlay Loaded. Nodes: {self.overlay.number_of_nodes()}, Edges: {self.overlay.number_of_edges()}")
+            logger.info(f"Overlay Loaded. Nodes: {self.overlay.number_of_nodes()}, Edges: {self.overlay.number_of_edges()}")
             
         except Exception as e:
-            print(f"Error loading Overlay: {e}")
+            logger.error(f"Error loading Overlay: {e}")
 
     def get_query_graph(self, start_node: int, end_node: int, node_to_shard: Dict[int, int]) -> nx.DiGraph:
         """
@@ -85,11 +88,11 @@ class GraphFacade:
         if start_shard is None or end_shard is None:
             raise ValueError("Start or End node not found in shard mapping.")
 
-        print(f"Fetching Start Shard {start_shard}...")
+        logger.info(f"Fetching Start Shard {start_shard}...")
         self._merge_shard_into_graph(query_graph, start_shard)
         
         if start_shard != end_shard:
-            print(f"Fetching End Shard {end_shard}...")
+            logger.info(f"Fetching End Shard {end_shard}...")
             self._merge_shard_into_graph(query_graph, end_shard)
             
         return query_graph
