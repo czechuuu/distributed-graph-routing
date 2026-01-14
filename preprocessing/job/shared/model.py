@@ -1,5 +1,5 @@
 
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, List
 
 class Node(NamedTuple):
     id: int
@@ -12,5 +12,8 @@ class Edge(NamedTuple):
     v: int
     weight: float
 
-
-
+class Shortcut(NamedTuple):
+    u: int
+    v: int
+    weight: float
+    path: List[int]

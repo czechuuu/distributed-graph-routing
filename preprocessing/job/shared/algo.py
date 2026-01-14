@@ -1,8 +1,7 @@
 
 import networkx as nx
 from typing import List, Tuple, Set
-from shared.model import Node, Edge
-
+from shared.model import Node, Edge, Shortcut
 
 def build_shard_graph(nodes: List[Node], edges: List[Edge]) -> nx.DiGraph:
     """Builds a NetworkX DiGraph for the shard."""
@@ -41,8 +40,7 @@ def identify_boundary_nodes(graph: nx.DiGraph, current_shard_id: int) -> Tuple[S
             
     return in_boundary, out_boundary
 
-def compute_shortcuts(graph: nx.DiGraph, in_nodes: Set[int], out_nodes: Set[int]) -> List[Edge]:
-    """Computes shortest paths from every in_node to every out_node."""
+def compute_shortcuts(graph: nx.DiGraph, in_nodes: Set[int], out_nodes: Set[int]) -> List[Shortcut]:
     shortcuts = []
     
     for src in in_nodes:
@@ -50,21 +48,23 @@ def compute_shortcuts(graph: nx.DiGraph, in_nodes: Set[int], out_nodes: Set[int]
             continue
             
         try:
-            # TODO (mkasprzak): calculate paths so they can be saved to BT
-            # Dijkstra returns lengths to all reachable nodes
-            lengths = nx.single_source_dijkstra_path_length(graph, src, weight='weight')
+            # Calculate weights and paths from src to all reachable nodes
+            weights, paths = nx.single_source_dijkstra(graph, src, weight='weight')
             
             for dst in out_nodes:
-                if dst in lengths:
-                    if src == dst:
-                        continue
+                if dst in weights:
+                    if src == dst: continue
                     
-                    weight = lengths[dst]
-                    shortcuts.append(Edge(src, dst, weight))
+                    # Create Shortcut object with full path
+                    shortcuts.append(Shortcut(
+                        u=src, 
+                        v=dst, 
+                        weight=weights[dst], 
+                        path=paths[dst] 
+                    ))
                     
         except Exception as e:
-            # Handle connected component issues or other graph errors
-            print(f"Error computing paths for source {src}: {e}")
+            print(f"Error for {src}: {e}")
             continue
 
     return shortcuts
