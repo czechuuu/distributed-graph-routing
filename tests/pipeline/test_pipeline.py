@@ -1,7 +1,7 @@
 import unittest
 import apache_beam as beam
-from shared.model import Node, Edge
-from contractions.pipeline import EmitShardsForEdge, ProcessShard
+from preprocessing.dataflow.model import Node, Edge
+from preprocessing.dataflow.pipeline import EmitShardsForEdge, ProcessShard
 
 class TestLogic(unittest.TestCase):
 

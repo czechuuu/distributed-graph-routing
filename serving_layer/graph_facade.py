@@ -12,7 +12,7 @@ except ImportError:
     logger.warning("google-cloud-bigtable not installed. Only mock mode will work.")
 from typing import Dict, List, Tuple
 
-from serving_layer import bigtable_storage_pb2
+from storage_types import bigtable_storage_pb2
 
 class GraphFacade:
     def __init__(self, project_id: str, instance_id: str, overlay_table_id: str, intra_table_id: str, use_mock: bool = False):

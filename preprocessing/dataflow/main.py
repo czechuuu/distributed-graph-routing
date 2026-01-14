@@ -1,7 +1,7 @@
 
 import argparse
 import logging
-from contractions.pipeline import create_pipeline
+from preprocessing.dataflow.pipeline import create_pipeline
 
 def run(argv=None):
     parser = argparse.ArgumentParser()

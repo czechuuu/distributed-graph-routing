@@ -2,7 +2,7 @@ import functions_framework
 import logging
 from datetime import datetime, timedelta, timezone
 from google.cloud import bigquery
-from contractions.pipeline import create_pipeline
+from preprocessing.dataflow.pipeline import create_pipeline
 
 PROJECT_ID = "repetitive-shortest-paths"
 DATASET_ID = "graph_data"

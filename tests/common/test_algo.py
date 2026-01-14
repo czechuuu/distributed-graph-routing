@@ -1,7 +1,7 @@
 import unittest
 import networkx as nx
-from shared.model import Node, Edge
-from shared.algo import build_shard_graph, identify_boundary_nodes, compute_shortcuts
+from preprocessing.dataflow.model import Node, Edge
+from preprocessing.dataflow.algo import build_shard_graph, identify_boundary_nodes, compute_shortcuts
 
 class TestAlgo(unittest.TestCase):
 

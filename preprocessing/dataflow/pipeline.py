@@ -3,11 +3,11 @@ import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions, GoogleCloudOptions
 from google.cloud.bigtable import row
 import struct
-from serving_layer import bigtable_storage_pb2
+from storage_types import bigtable_storage_pb2
 
-from contractions.io_wrappers import ReadNodesFromBQ, ReadEdgesFromBQ, WriteToBT
-from shared.model import Node, Edge
-from shared.algo import build_shard_graph, identify_boundary_nodes, compute_shortcuts
+from preprocessing.dataflow.io_wrappers import ReadNodesFromBQ, ReadEdgesFromBQ, WriteToBT
+from preprocessing.dataflow.model import Node, Edge
+from preprocessing.dataflow.algo import build_shard_graph, identify_boundary_nodes, compute_shortcuts
 
 from enum import Enum
 

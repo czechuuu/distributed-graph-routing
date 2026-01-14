@@ -16,5 +16,5 @@ setuptools.setup(
         'pip',  # Required for Apache Beam stager
         'build', # Required for creating source distribution
     ],
-    packages=['shared', 'contractions', 'serving_layer'],
+    packages=['preprocessing.dataflow', 'storage_types', 'serving_layer'],
 )

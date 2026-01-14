@@ -12,8 +12,8 @@ from serving_layer.app import app, state
 
 from serving_layer.graph_facade import GraphFacade
 from serving_layer.engine import find_shortest_path
-from shared.model import Node, Edge, Shortcut
-from shared.algo import build_shard_graph, identify_boundary_nodes, compute_shortcuts
+from preprocessing.dataflow.model import Node, Edge, Shortcut
+from preprocessing.dataflow.algo import build_shard_graph, identify_boundary_nodes, compute_shortcuts
 
 client = TestClient(app)
 
