@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import './App.css';
+import 'leaflet/dist/leaflet.css';
+import { MapContainer, TileLayer } from 'react-leaflet';
 import { GraphRenderer } from './components/GraphRenderer';
 import type { GraphRendererHandle } from './components/GraphRenderer';
 import { MockGraphProvider } from './domain/GraphProvider';
@@ -9,8 +11,12 @@ import type { ShardControlItem, ShardViewMode } from './components/ShardManager'
 import type { NodeLocation, Edge, OverlayGraph, ShardData } from './domain/types';
 import { NodeType } from './domain/types';
 import { computeContraction } from './domain/pathLogic';
+import { StartupModal } from './components/StartupModal';
+import { type Region } from './domain/MapMetadata';
 
 function App() {
+  const [activeRegion, setActiveRegion] = useState<Region | null>(null);
+
   const [overlayGraph, setOverlayGraph] = useState<OverlayGraph>({ bridges: [], shortcuts: [] });
   const [selectedNode, setSelectedNode] = useState<NodeLocation | null>(null);
   const [activePath, setActivePath] = useState<NodeLocation[] | null>(null);
@@ -98,12 +104,20 @@ function App() {
         });
         if (initialMode !== 'NONE') graphRef.current?.fitToNodes(shardData.nodes);
       } catch (e) {
+        alert('Shard not found: ' + id);
         setManagedShards(prev => prev.filter(s => s.id !== id));
       }
     }
   };
   // overload/wrapper for ShardManager compat
-  const handleAddShardUI = (id: string) => handleAddShard(id, 'ALL');
+  const handleAddShardUI = (idLine: string) => {
+    const ids = idLine.split(',').map(s => s.trim()).filter(Boolean);
+    ids.forEach(id => {
+      if (!managedShards.find(s => s.id === id)) {
+        handleAddShard(id);
+      }
+    });
+  };
 
   const handleToggleShard = (id: string, mode: ShardViewMode) => {
     setManagedShards(prev => prev.map(s => s.id === id ? { ...s, mode } : s));
@@ -115,23 +129,30 @@ function App() {
 
   const handleRemoveShard = (id: string) => {
     setManagedShards(prev => prev.filter(s => s.id !== id));
-    setShardCache(prev => {
-      const next = new Map(prev);
-      next.delete(id);
-      return next;
-    });
+    // setShardCache(prev => { // Removed as per instructions
+    //   const next = new Map(prev);
+    //   next.delete(id);
+    //   return next;
+    // });
   };
 
-  const handleHighlightShard = (id: string) => {
-    const el = document.getElementById(`shard-item-${id}`);
-    if (el) {
-      el.classList.add('highlight');
-      setTimeout(() => el.classList.remove('highlight'), 500);
-    }
+  const handleHighlightShard = () => {
+    // const el = document.getElementById(`shard-item-${id}`); // Removed as per instructions
+    // if (el) {
+    //   el.classList.add('highlight');
+    //   setTimeout(() => el.classList.remove('highlight'), 500);
+    // }
+    // Optional: flash shard?
   };
 
   const handleNodeClick = (node: NodeLocation | null) => {
-    setSelectedNode(node);
+    if (node) {
+      console.log('Clicked Node:', node);
+      setSelectedNode(node);
+      graphRef.current?.focusNode(node.node_id);
+    } else {
+      setSelectedNode(null);
+    }
   };
 
   const handleSearch = () => {
@@ -182,139 +203,165 @@ function App() {
     setActivePath(null);
   };
 
+  const handleSelectRegion = (region: Region) => {
+    setActiveRegion(region);
+  };
+
+  if (!activeRegion) {
+    return <StartupModal onSelectRegion={handleSelectRegion} />;
+  }
+
+  const centerLat = (activeRegion.bounds.minLat + activeRegion.bounds.maxLat) / 2;
+  const centerLon = (activeRegion.bounds.minLon + activeRegion.bounds.maxLon) / 2;
+
   return (
-    <div className="App">
-      <PathControl
-        sourceId={pathSourceId}
-        targetId={pathTargetId}
-        onSetSource={setPathSourceId}
-        onSetTarget={setPathTargetId}
-        onFindPath={handleFindPath}
-        onClearPath={handleClearPath}
-        isLoading={isPathLoading}
-      />
+    <div className="App" style={{ width: '100vw', height: '100vh', display: 'flex' }}>
+      <MapContainer
+        center={[centerLat, centerLon]}
+        zoom={13}
+        style={{ width: '100%', height: '100%' }}
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <GraphRenderer
+          ref={graphRef}
+          nodes={displayNodes}
+          intraEdges={displayEdges}
+          overlayEdges={displayOverlayEdges}
+          onNodeClick={handleNodeClick}
+          selectedNodeId={selectedNode?.node_id}
+          pathEdges={pathEdges}
+          pathNodes={pathNodesSet}
+        />
 
-      <GraphRenderer
-        ref={graphRef}
-        nodes={displayNodes}
-        intraEdges={displayEdges}
-        overlayEdges={displayOverlayEdges}
-        onNodeClick={handleNodeClick}
-        selectedNodeId={selectedNode?.node_id}
-        pathEdges={pathEdges}
-        pathNodes={pathNodesSet}
-      />
+        {/* UI Overlay Controls - We need them ON TOP of the map */}
+        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '0px', zIndex: 1000 }}>
+          <PathControl
+            sourceId={pathSourceId}
+            targetId={pathTargetId}
+            onSetSource={setPathSourceId}
+            onSetTarget={setPathTargetId}
+            onFindPath={handleFindPath}
+            onClearPath={handleClearPath}
+            isLoading={isPathLoading}
+          />
 
-      {isStatsCollapsed ? (
-        <button
-          onClick={() => setIsStatsCollapsed(false)}
-          title="Open Stats & Search"
-          style={{
-            position: 'fixed', top: 10, left: 10,
-            background: '#333', color: 'white',
-            border: '1px solid #555', borderRadius: '50%',
-            width: '40px', height: '40px', fontSize: '20px',
-            cursor: 'pointer', zIndex: 9999,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
-          }}
-        >
-          🔍
-        </button>
-      ) : (
-        <div style={{
-          position: 'fixed',
-          top: 10,
-          left: 10,
-          width: '300px',
-          color: 'white',
-          background: 'rgba(30,30,30,0.95)',
-          padding: '12px',
-          borderRadius: '8px',
-          zIndex: 9999,
-          backdropFilter: 'blur(4px)',
-          fontFamily: 'monospace',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-          border: '1px solid #444'
-        }}>
-          <div style={{
-            fontWeight: 'bold', fontSize: '1rem', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '4px',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-          }}>
-            <span>Find node</span>
-            <button onClick={() => setIsStatsCollapsed(true)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer' }}>✕</button>
-          </div>
-
-          <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>
-            Total Nodes: {displayNodes.length} &middot; Edges: {displayEdges.length + displayOverlayEdges.bridges.length + displayOverlayEdges.shortcuts.length} (Path: {activePath ? activePath.length : 0})
-          </div>
-
-          {/* Search Box */}
-          <div style={{ display: 'flex', gap: '4px', pointerEvents: 'auto' }}>
-            <input
-              type="text"
-              placeholder="Node ID"
-              value={searchId}
-              onChange={(e) => setSearchId(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
-              style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.3)', color: 'white', borderRadius: '4px', padding: '4px', flex: 1 }}
+          <div style={{ position: 'absolute', top: 10, left: 240, zIndex: 1001 }}>
+            <ShardManager
+              shards={managedShards}
+              onAddShard={handleAddShardUI}
+              onToggleShard={handleToggleShard}
+              onRemoveShard={handleRemoveShard}
+              onHighlightShard={handleHighlightShard}
+              onToggleAll={handleToggleAll}
             />
-            <button
-              onClick={handleSearch}
-              style={{ background: '#444', color: 'white', border: '1px solid #666', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer' }}
-            >
-              Search
-            </button>
           </div>
 
-          <button
-            onClick={() => graphRef.current?.resetView()}
-            style={{ background: '#444', color: 'white', border: '1px solid #666', borderRadius: '4px', padding: '4px 8px', fontSize: '0.8rem', cursor: 'pointer', alignSelf: 'flex-start' }}
-          >
-            Fit View
-          </button>
+          {/* Stats Panel */}
+          {isStatsCollapsed ? (
+            <button
+              onClick={() => setIsStatsCollapsed(false)}
+              title="Open Stats & Search"
+              style={{
+                position: 'fixed', top: 10, left: 10,
+                background: '#333', color: 'white',
+                border: '1px solid #555', borderRadius: '50%',
+                width: '40px', height: '40px', fontSize: '20px',
+                cursor: 'pointer', zIndex: 9999,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+              }}
+            >
+              🔍
+            </button>
+          ) : (
+            <div style={{
+              position: 'fixed',
+              top: 10,
+              left: 10,
+              width: '300px',
+              color: 'white',
+              background: 'rgba(30,30,30,0.95)',
+              padding: '12px',
+              borderRadius: '8px',
+              zIndex: 9999,
+              backdropFilter: 'blur(4px)',
+              fontFamily: 'monospace',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+              border: '1px solid #444'
+            }}>
+              <div style={{
+                fontWeight: 'bold', fontSize: '1rem', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '4px',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+              }}>
+                <span>Find node</span>
+                <button onClick={() => setIsStatsCollapsed(true)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer' }}>✕</button>
+              </div>
 
-          {selectedNode && (
-            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', fontSize: '0.85rem' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>Selected Node</div>
-              <div>ID: {selectedNode.node_id}</div>
-              <div>Shard: {selectedNode.shard_id}</div>
-              <div>Type: {selectedNode.type}</div>
-              <div>Loc: ({selectedNode.x.toFixed(1)}, {selectedNode.y.toFixed(1)})</div>
+              <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>
+                Total Nodes: {displayNodes.length} &middot; Edges: {displayEdges.length + displayOverlayEdges.bridges.length + displayOverlayEdges.shortcuts.length} (Path: {activePath ? activePath.length : 0})
+              </div>
 
-              <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+              {/* Search Box */}
+              <div style={{ display: 'flex', gap: '4px', pointerEvents: 'auto' }}>
+                <input
+                  type="text"
+                  placeholder="Node ID"
+                  value={searchId}
+                  onChange={(e) => setSearchId(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
+                  style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.3)', color: 'white', borderRadius: '4px', padding: '4px', flex: 1 }}
+                />
                 <button
-                  onClick={() => setPathSourceId(selectedNode.node_id)}
-                  style={{ flex: 1, background: '#2196F3', border: 'none', color: 'white', padding: '2px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+                  onClick={handleSearch}
+                  style={{ background: '#444', color: 'white', border: '1px solid #666', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer' }}
                 >
-                  Set Src
-                </button>
-                <button
-                  onClick={() => setPathTargetId(selectedNode.node_id)}
-                  style={{ flex: 1, background: '#4CAF50', border: 'none', color: 'white', padding: '2px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
-                >
-                  Set Dst
+                  Search
                 </button>
               </div>
+
+              <button
+                onClick={() => graphRef.current?.resetView()}
+                style={{ background: '#444', color: 'white', border: '1px solid #666', borderRadius: '4px', padding: '4px 8px', fontSize: '0.8rem', cursor: 'pointer', alignSelf: 'flex-start' }}
+              >
+                Fit View
+              </button>
+
+              {selectedNode && (
+                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', fontSize: '0.85rem' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>Selected Node</div>
+                  <div>ID: {selectedNode.node_id}</div>
+                  <div>Shard: {selectedNode.shard_id}</div>
+                  <div>Type: {selectedNode.type}</div>
+                  <div>Loc: ({selectedNode.y.toFixed(4)}, {selectedNode.x.toFixed(4)})</div>
+
+                  <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+                    <button
+                      onClick={() => setPathSourceId(selectedNode.node_id)}
+                      style={{ flex: 1, background: '#2196F3', border: 'none', color: 'white', padding: '2px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+                    >
+                      Set Src
+                    </button>
+                    <button
+                      onClick={() => setPathTargetId(selectedNode.node_id)}
+                      style={{ flex: 1, background: '#4CAF50', border: 'none', color: 'white', padding: '2px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+                    >
+                      Set Dst
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
-      )}
-
-      <ShardManager
-        shards={managedShards}
-        onAddShard={handleAddShardUI}
-        onToggleShard={handleToggleShard}
-        onRemoveShard={handleRemoveShard}
-        onHighlightShard={handleHighlightShard}
-        onToggleAll={handleToggleAll}
-      />
+      </MapContainer>
     </div>
   );
 }
-
 
 export default App;
