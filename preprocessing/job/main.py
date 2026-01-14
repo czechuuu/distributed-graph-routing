@@ -23,7 +23,7 @@ def process_graph_upload(cloud_event):
     
     client = bigquery.Client(project=PROJECT_ID)
 
-    # 1. Define schemas based ONLY on what is in the CSV
+    # Define schemas based ONLY on what is in the CSV
     node_csv_schema = [
         bigquery.SchemaField("id", "INT64"),
         bigquery.SchemaField("y", "FLOAT64"),
@@ -49,7 +49,7 @@ def process_graph_upload(cloud_event):
         print(f"Unknown file type: {file_name}")
         return
 
-    # 2. Load the CSV data
+    # Load the CSV data
     job_config = bigquery.LoadJobConfig(
         schema=schema,
         source_format=bigquery.SourceFormat.CSV,
@@ -65,7 +65,7 @@ def process_graph_upload(cloud_event):
         print(f"Load Job Failed: {e}")
         return
 
-    # 3. Add and Update ShardId for the nodes table
+    # Add and Update ShardId for the nodes table
     if "nodes" in file_name:
         setup_query = f"""
             -- Ensure ShardId column exists if it doesn't
@@ -85,7 +85,7 @@ def process_graph_upload(cloud_event):
         client.query(setup_query).result()
         print("ShardId column ensured and values calculated.")
 
-    # 4. Check if we should trigger the contraction pipeline
+    # Check if we should trigger the contraction pipeline
     check_and_trigger_pipeline(client, table_name)
 
 def check_and_trigger_pipeline(client, current_table_name):
@@ -119,32 +119,13 @@ def check_and_trigger_pipeline(client, current_table_name):
     # Threshold for considering them "triggered together"
     threshold = timedelta(minutes=10)
     
-    # 1. Check if they are close in time
+    # Check if they are close in time
     time_diff = abs(t_nodes - t_edges)
     if time_diff > threshold:
         print(f"Time difference {time_diff} > {threshold}. Not triggering pipeline.")
         return
 
-    # 2. Logic to ensure only one specific invocation triggers it.
-    # We trigger if:
-    # - This table was modified AFTER the other table
-    # - OR This table was modified AT THE SAME TIME (unlikely) and we use a tie-breaker (e.g. prioritize edges)
-    #
-    # Actually, simpler:
-    # If t_current >= t_other, we are the "last" one (or tied), so we trigger.
-    # The previous one would have seen t_prev < t_current (because t_current wasn't updated yet or was old).
-    #
-    # Wait, if t_current (new) is compared to t_other (new), and t_current >= t_other:
-    #   We trigger.
-    # The other execution (which updated t_other) checked t_current (old).
-    #   Old t_current << t_other (new).
-    #   Diff was huge. It returned early. 
-    #   So checking diff first handles the "I'm the first one" case effectively.
-    
-    # So if we passed the diff check, it means BOTH are new.
-    # So we just need to decide who triggers.
-    # trigger if t_current >= t_other
-    
+    # Logic to ensure only one specific invocation triggers it.    
     if t_current >= t_other:
         print("Triggering Contraction Pipeline...")
         trigger_pipeline()
@@ -159,14 +140,7 @@ def trigger_pipeline():
         f"--temp_location={TEMP_LOCATION}",
         f"--staging_location={STAGING_LOCATION}",
         f"--setup_file=./setup.py",
-        # Optimization: use pre-built SDK container if possible, 
-        # but setup.py should handle dependencies.
     ]
-    
-    # Input/Output arguments
-    # Note: contractions/main.py uses argparse which we can bypass or simulate.
-    # But contractions/main.py calls create_pipeline directly.
-    # We will call create_pipeline directly.
     
     create_pipeline(
         project=PROJECT_ID,
