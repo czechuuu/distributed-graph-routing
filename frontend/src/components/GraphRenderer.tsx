@@ -103,14 +103,14 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
             }
         };
 
-        // Shortcuts (Gray Dashed)
-        overlayEdges.shortcuts.forEach(e => drawEdge(e, '#555', 1, true));
+        // Shortcuts (Purple Dashed)
+        overlayEdges.shortcuts.forEach(e => drawEdge(e, '#651FFF', 1.5, true));
 
-        // Intra-Edges (Light Gray)
-        intraEdges.forEach(e => drawEdge(e, '#888', 1));
+        // Intra-Edges (Dark Grey)
+        intraEdges.forEach(e => drawEdge(e, '#333', 1.2));
 
         // Bridges (Cyan/Blue)
-        overlayEdges.bridges.forEach(e => drawEdge(e, 'rgba(0, 200, 255, 0.6)', 2));
+        overlayEdges.bridges.forEach(e => drawEdge(e, 'rgba(0, 200, 255, 0.8)', 2.5));
 
         // Path Edges (Bright Yellow/Green)
         if (pathEdges) {
@@ -123,7 +123,7 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
 
                 // If the edge connects two nodes that are far apart in the node list, etc.
                 // Just draw it thick.
-                drawEdge(e, '#FFEB3B', 3);
+                drawEdge(e, '#FFEB3B', 4);
             });
             ctx.shadowBlur = 0;
         }
@@ -136,8 +136,8 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
             const isSelected = selectedNodeId === n.node_id;
             const isPathNode = pathNodes?.has(n.node_id);
 
-            let radius = 3;
-            let color = '#aaa';
+            let radius = 4;
+            let color = '#2979FF'; // Vibrant Blue
 
             if (n.type === NodeType.BOUNDARY) {
                 radius = 5;
