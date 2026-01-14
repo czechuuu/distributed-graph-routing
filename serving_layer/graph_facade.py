@@ -36,10 +36,10 @@ class GraphFacade:
         try:
             rows = self.overlay_table.read_rows()
             for row in rows:
-                # 1. Load Proto structure (Pure Proto approach)
+                # Load Proto structure
                 cell_proto = row.cells.get('cf', {}).get(b'shortcuts_proto', [])
                 
-                # --- A. Parse Shortcuts ---
+                # Parse Shortcuts
                 if cell_proto:
                     overlay_pb = bigtable_storage_pb2.OverlayGraph()
                     overlay_pb.ParseFromString(cell_proto[0].value)
@@ -59,7 +59,7 @@ class GraphFacade:
                             if edge.path:
                                 self.shortcut_expansions[(v, u)] = list(edge.path)[::-1]
 
-                # --- B. Parse Bridges (Inter-shard edges) ---
+                # Parse Bridges (Inter-shard edges)
                 cell_bridges = row.cells.get('cf', {}).get(b'inter_edges_proto', [])
                 if cell_bridges:
                     bridges_pb = bigtable_storage_pb2.OverlayGraph()
