@@ -27,6 +27,7 @@ export function generateMockOverlayGraph(nodeCount: number = 100, shardCount: nu
             const id = (s * (nodeCount / shardCount) + i).toString();
             nodes.push({
                 node_id: id,
+                shard_id: s.toString(),
                 x: cx + (rng.next() - 0.5) * 150,
                 y: cy + (rng.next() - 0.5) * 150
             });

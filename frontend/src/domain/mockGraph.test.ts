@@ -18,6 +18,14 @@ describe('generateMockOverlayGraph', () => {
         });
     });
 
+    it('should assign shard IDs', () => {
+        const data = generateMockOverlayGraph(10, 2);
+        data.nodes.forEach(n => {
+            expect(n.shard_id).toBeDefined();
+            expect(typeof n.shard_id).toBe('string');
+        });
+    });
+
     it('should produce reproducible results', () => {
         const run1 = generateMockOverlayGraph(20, 2);
         const run2 = generateMockOverlayGraph(20, 2);

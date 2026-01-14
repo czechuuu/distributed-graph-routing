@@ -1,5 +1,6 @@
 export interface NodeLocation {
     node_id: string; // strict proto says fixed64 (string in JS)
+    shard_id: string;
     x: number;
     y: number;
 }
