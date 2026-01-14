@@ -11,6 +11,7 @@ interface ShardManagerProps {
     onToggleShard: (id: string, visible: boolean) => void;
     onRemoveShard: (id: string) => void;
     onHighlightShard: (id: string) => void;
+    onToggleAll: (visible: boolean) => void;
 }
 
 export const ShardManager: React.FC<ShardManagerProps> = ({
@@ -18,33 +19,38 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
     onAddShard,
     onToggleShard,
     onRemoveShard,
-    onHighlightShard
+    onHighlightShard,
+    onToggleAll
 }) => {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [inputValue, setInputValue] = useState('');
     const listRef = useRef<HTMLDivElement>(null);
 
     const handleAdd = () => {
-        const id = inputValue.trim();
-        if (!id) return;
+        const rawInput = inputValue;
+        if (!rawInput.trim()) return;
 
-        const existing = shards.find(s => s.id === id);
-        if (existing) {
-            onHighlightShard(id);
-            if (!existing.visible) {
-                onToggleShard(id, true);
-            }
-            // Scroll to it
-            const el = document.getElementById(`shard-item-${id}`);
-            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        } else {
-            onAddShard(id);
-            // Scroll to bottom after render
-            setTimeout(() => {
+        const ids = rawInput.split(',').map(s => s.trim()).filter(Boolean);
+
+        ids.forEach(id => {
+            const existing = shards.find(s => s.id === id);
+            if (existing) {
+                onHighlightShard(id);
+                if (!existing.visible) {
+                    onToggleShard(id, true);
+                }
+                // Scroll to it
                 const el = document.getElementById(`shard-item-${id}`);
                 if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }, 50);
-        }
+            } else {
+                onAddShard(id);
+                // Scroll to bottom after render - wait for last one
+                setTimeout(() => {
+                    const el = document.getElementById(`shard-item-${id}`);
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }, 50);
+            }
+        });
         setInputValue('');
     };
 
@@ -111,6 +117,24 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                     ✕
                 </button>
             </div>
+
+            {/* Global Controls */}
+            {shards.length > 0 && (
+                <div style={{ padding: '8px 10px', display: 'flex', gap: '10px', borderBottom: '1px solid #333' }}>
+                    <button
+                        onClick={() => onToggleAll(true)}
+                        style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
+                    >
+                        👁️ Show All
+                    </button>
+                    <button
+                        onClick={() => onToggleAll(false)}
+                        style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
+                    >
+                        🚫 Hide All
+                    </button>
+                </div>
+            )}
 
             {/* Input */}
             <div style={{ padding: '10px', display: 'flex', gap: '5px' }}>

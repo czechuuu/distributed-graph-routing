@@ -96,6 +96,10 @@ function App() {
     setManagedShards(prev => prev.map(s => s.id === id ? { ...s, visible } : s));
   };
 
+  const handleToggleAll = (visible: boolean) => {
+    setManagedShards(prev => prev.map(s => ({ ...s, visible })));
+  };
+
   const handleRemoveShard = (id: string) => {
     setManagedShards(prev => prev.filter(s => s.id !== id));
     setShardCache(prev => {
@@ -234,6 +238,7 @@ function App() {
         onToggleShard={handleToggleShard}
         onRemoveShard={handleRemoveShard}
         onHighlightShard={handleHighlightShard}
+        onToggleAll={handleToggleAll}
       />
     </div>
   );
