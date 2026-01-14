@@ -13,4 +13,5 @@ dependencies = [
     "grpcio<1.66.0", # Pinned for Apache Beam compatibility
     "pip", # Required for Apache Beam stager
     "setuptools",
+    "build",
 ]

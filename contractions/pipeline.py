@@ -159,7 +159,7 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
         pipeline_args.append('--prebuild_sdk_container_engine=cloud_build')
         pipeline_args.append(f'--docker_registry_push_url=gcr.io/{project}/dataflow/graph-routing-worker-sdk')
         pipeline_args.append('--experiments=use_runner_v2')
-        pipeline_args.append(f'--sdk_container_image=docker.io/apache/beam_python3.10_sdk:{beam.version.__version__}')
+        pipeline_args.append(f'--sdk_container_image=docker.io/apache/beam_python3.12_sdk:{beam.version.__version__}')
 
     # Initialize PipelineOptions with passed args (e.g. --runner, --region) using flags argument.
     options = PipelineOptions(flags=pipeline_args)

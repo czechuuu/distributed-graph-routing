@@ -14,6 +14,7 @@ setuptools.setup(
         'protobuf==6.31.1',
         'grpcio<1.66.0',  # Pinned for Apache Beam compatibility
         'pip',  # Required for Apache Beam stager
+        'build', # Required for creating source distribution
     ],
     packages=['shared', 'contractions', 'serving_layer'],
 )
