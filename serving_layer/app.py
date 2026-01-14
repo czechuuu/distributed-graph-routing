@@ -22,30 +22,13 @@ logger = logging.getLogger("ServingLayer")
 # --- Global State ---
 class AppState:
     facade: Optional[GraphFacade] = None
-    node_index: Dict[int, int] = {}
+    facade: Optional[GraphFacade] = None
 
 state = AppState()
-
-# --- Helpers ---
-def load_node_index(project_id: str) -> Dict[int, int]:
-    """Loads NodeID -> ShardID mapping from BigQuery."""
-    logger.info("Loading Node Index from BigQuery...")
-    client = bigquery.Client(project=project_id)
-    
-    query = f"""
-        SELECT id, ShardId 
-        FROM `{project_id}.graph_data.nodes`
-    """
-    
-    try:
-        query_job = client.query(query)
-        results = query_job.result()
-        index = {row.id: row.ShardId for row in results}
-        logger.info(f"Loaded index for {len(index)} nodes.")
-        return index
-    except Exception as e:
-        logger.error(f"Failed to load index from BigQuery: {e}")
-        return {}
+# TODO: We should consider implementing a Bigtable Index Table (NodeID -> ShardID) or sth 
+# to allow looking up shards dynamically without memory overhead.
+# For now, we require the client to provide the shard ID.
+# (At least I don't see any way to get shard ID based on node ID).
 
 # --- Lifespan ---
 @contextlib.asynccontextmanager
@@ -62,12 +45,7 @@ async def lifespan(app: FastAPI):
         logger.critical(f"Failed to connect to Bigtable: {e}")
         sys.exit(1)
 
-    if not USE_MOCK:
-        state.node_index = load_node_index(PROJECT_ID)
-    else:
-        logger.info("Mock mode: Skipping BigQuery index load. Injecting mock data...")
-        state.node_index = {1: 1, 2: 1, 3: 1, 4: 2, 5: 2}
-        
+    if USE_MOCK:
         # Inject Topology
         # Shard 1: 1 -> 2 -> 3 (Exit)
         # Overlay: 3 -> 4 (Bridge)
@@ -92,7 +70,9 @@ app = FastAPI(title="Distributed Graph Routing API", lifespan=lifespan)
 # --- Models ---
 class RouteRequest(BaseModel):
     start_node: int
+    start_node_shard: int
     end_node: int
+    end_node_shard: int
 
 class RouteResponse(BaseModel):
     path: List[int]
@@ -101,8 +81,9 @@ class RouteResponse(BaseModel):
 
 # --- Endpoints ---
 @app.get("/health")
+@app.get("/health")
 def health_check():
-    return {"status": "ok", "mock": USE_MOCK, "nodes_indexed": len(state.node_index)}
+    return {"status": "ok", "mock": USE_MOCK}
 
 @app.post("/route", response_model=RouteResponse)
 def get_route(req: RouteRequest):
@@ -111,12 +92,8 @@ def get_route(req: RouteRequest):
 
     u, v = req.start_node, req.end_node
     
-    # Resolve Shards
-    shard_u = state.node_index.get(u)
-    shard_v = state.node_index.get(v)
-    
-    if (shard_u is None or shard_v is None) and not USE_MOCK:
-        raise HTTPException(status_code=404, detail=f"Nodes {u} or {v} not found in index")
+    u, v = req.start_node, req.end_node
+    shard_u, shard_v = req.start_node_shard, req.end_node_shard
     
     node_map = {u: shard_u, v: shard_v} # Engine expects this dict for involved nodes
 
