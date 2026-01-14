@@ -81,15 +81,14 @@ class ExtractOverlayEdges(beam.DoFn):
         
         overlay_proto = bigtable_storage_pb2.OverlayGraph()
         
-        # Add Shortcuts (Topology only)
+        # Add Shortcuts
         for s in shortcuts:
             pb_edge = overlay_proto.shortcuts.add()
             pb_edge.from_node_id = s.u
             pb_edge.to_node_id = s.v
             pb_edge.weight = int(s.weight) 
-            # Note: Path is NOT added here anymore
             
-        # Add Inter-shard Edges (Bridges)
+        # Add Bridges
         for e in inter_shard_edges:
             pb_edge = overlay_proto.bridges.add()
             pb_edge.from_node_id = e.u
@@ -129,12 +128,12 @@ class CreateOverlayMutation(beam.DoFn):
 class CreateIntraMutations(beam.DoFn):
     def process(self, element):
         shard_id, G = element
-        row_key = f"{shard_id}".encode('utf-8')
+        row_key = f"S#{shard_id}".encode('utf-8')
         direct_row = row.DirectRow(row_key)
         
-        # --- Write Intra-shard Edges (ShardGraph) ---
         shard_proto = bigtable_storage_pb2.ShardGraph()
         
+        # Add Edges
         for u, v, d in G.edges(data=True):
             # Filter internal edges only
             u_node = G.nodes[u]
@@ -144,6 +143,14 @@ class CreateIntraMutations(beam.DoFn):
                  pb_edge.from_node_id = u
                  pb_edge.to_node_id = v
                  pb_edge.weight = int(d['weight'])
+        
+        # Add Node Locations
+        for n, data in G.nodes(data=True):
+             if data.get('shard_id') == shard_id:
+                 loc = shard_proto.locations.add()
+                 loc.node_id = n
+                 loc.x = data.get('x', 0.0)
+                 loc.y = data.get('y', 0.0)
         
         direct_row.set_cell('cf', 'shard_graph_proto', shard_proto.SerializeToString())
         yield direct_row
@@ -170,7 +177,7 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
     google_cloud_options.temp_location = temp_location
     
     setup_options = options.view_as(SetupOptions)
-    setup_options.setup_file = './preprocessing/job/setup.py'
+    setup_options.setup_file = './setup.py'
     
     with beam.Pipeline(options=options) as p:
         nodes = p | "ReadNodes" >> ReadNodesFromBQ(input_nodes)
