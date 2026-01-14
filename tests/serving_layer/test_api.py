@@ -13,7 +13,6 @@ class TestServingLayerAPI(unittest.TestCase):
     def setUp(self):
         # Reset state before each test
         state.facade = MagicMock(spec=GraphFacade)
-        state.node_index = {}
         
     def test_health_check_mock_mode(self):
         response = client.get("/health")
@@ -21,7 +20,6 @@ class TestServingLayerAPI(unittest.TestCase):
         data = response.json()
         self.assertEqual(data['status'], 'ok')
         self.assertIn('mock', data)
-        self.assertIn('nodes_indexed', data)
 
     def test_route_success(self):
         state.node_index = {1: 10, 5: 10}
@@ -29,7 +27,7 @@ class TestServingLayerAPI(unittest.TestCase):
         with patch('serving_layer.app.find_shortest_path') as mock_algo:
             mock_algo.return_value = [1, 2, 3, 4, 5]
             
-            payload = {"start_node": 1, "end_node": 5}
+            payload = {"start_node": 1, "start_node_shard": 10, "end_node": 5, "end_node_shard": 10}
             response = client.post("/route", json=payload)
             
             self.assertEqual(response.status_code, 200)
@@ -47,23 +45,11 @@ class TestServingLayerAPI(unittest.TestCase):
             self.assertEqual(args[2], 5) # v
             self.assertEqual(args[3], {1: 10, 5: 10}) # node_map
 
-    def test_route_not_found_in_index(self):
-        with patch('serving_layer.app.USE_MOCK', False):
-            state.node_index = {} # Empty index
-            
-            payload = {"start_node": 999, "end_node": 888}
-            response = client.post("/route", json=payload)
-            
-            self.assertEqual(response.status_code, 404)
-            self.assertIn("not found", response.json()['detail'])
-
     def test_route_no_path_found(self):
-        state.node_index = {1: 1, 2: 2}
-        
         with patch('serving_layer.app.find_shortest_path') as mock_algo:
             mock_algo.return_value = [] # No path
             
-            payload = {"start_node": 1, "end_node": 2}
+            payload = {"start_node": 1, "start_node_shard": 1, "end_node": 2, "end_node_shard": 2}
             response = client.post("/route", json=payload)
             
             self.assertEqual(response.status_code, 200)
@@ -75,7 +61,7 @@ class TestServingLayerAPI(unittest.TestCase):
     def test_server_uninitialized(self):
         state.facade = None
         
-        payload = {"start_node": 1, "end_node": 2}
+        payload = {"start_node": 1, "start_node_shard": 1, "end_node": 2, "end_node_shard": 2}
         response = client.post("/route", json=payload)
         
         self.assertEqual(response.status_code, 503)
