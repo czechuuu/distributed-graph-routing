@@ -170,7 +170,7 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
     google_cloud_options.temp_location = temp_location
     
     setup_options = options.view_as(SetupOptions)
-    setup_options.setup_file = './setup.py'
+    setup_options.setup_file = './preprocessing/job/setup.py'
     
     with beam.Pipeline(options=options) as p:
         nodes = p | "ReadNodes" >> ReadNodesFromBQ(input_nodes)
