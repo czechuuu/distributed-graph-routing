@@ -13,9 +13,14 @@ import { computeContraction } from './domain/pathLogic';
 function App() {
   const [overlayGraph, setOverlayGraph] = useState<OverlayGraph>({ bridges: [], shortcuts: [] });
   const [selectedNode, setSelectedNode] = useState<NodeLocation | null>(null);
-  const [searchId, setSearchId] = useState('');
   const [activePath, setActivePath] = useState<NodeLocation[] | null>(null);
   const [isPathLoading, setIsPathLoading] = useState(false);
+  const [searchId, setSearchId] = useState('');
+
+  // QOL State
+  const [pathSourceId, setPathSourceId] = useState('');
+  const [pathTargetId, setPathTargetId] = useState('');
+  const [isStatsCollapsed, setIsStatsCollapsed] = useState(false);
   const graphRef = useRef<GraphRendererHandle>(null);
 
   // Shard State
@@ -139,54 +144,55 @@ function App() {
     }
   };
 
-  const handleFindPath = async (src: string, dst: string) => {
+  const handleFindPath = async () => {
+    if (!pathSourceId || !pathTargetId) return;
     setIsPathLoading(true);
     try {
-      const path = await providerRef.current.findPath(src, dst);
+      const path = await providerRef.current.findPath(pathSourceId, pathTargetId);
       setActivePath(path);
 
-      // Auto-load & set mode for relevant shards
-      const shardsInPath = new Set(path.map(n => n.shard_id));
-      const needed = Array.from(shardsInPath);
+      // Auto-unhide shards involved in path
+      const involvedShardIds = new Set(path.map(n => n.shard_id));
 
-      // We can't auto-fetch all inside 'setManagedShards' easily with async.
-      // For now, let's just ensure they are managed.
-      // Best effort: switch existing to PATH mode if NONE.
-      setManagedShards(prev => {
-        const next = [...prev];
-        needed.forEach(sid => {
-          const idx = next.findIndex(s => s.id === sid);
-          if (idx >= 0) {
-            // If hidden, switch to PATH
-            if (next[idx].mode === 'NONE') next[idx] = { ...next[idx], mode: 'PATH' };
-          } else {
-            // Add new shard in ALL mode? Or PATH mode?
-            // Let's add in PATH mode to not overwhelm.
-            next.push({ id: sid, mode: 'PATH' });
-            // IMPORTANT: We need to trigger fetch!
-            // This simple set state won't fetch. 
-            // We should call handleAddShard logic.
-          }
-        });
-        return next;
+      // 1. Trigger add for missing shards
+      involvedShardIds.forEach(sid => {
+        const isManaged = managedShards.some(s => s.id === sid);
+        if (!isManaged) {
+          handleAddShard(sid, 'PATH');
+        }
       });
 
-      // Trigger fetches for missing
-      needed.forEach(sid => {
-        if (!shardCache.has(sid)) handleAddShard(sid, 'PATH');
-      });
+      // 2. Switch hidden shards to PATH mode
+      setManagedShards(prev => prev.map(s => {
+        if (involvedShardIds.has(s.id) && s.mode === 'NONE') {
+          return { ...s, mode: 'PATH' };
+        }
+        return s;
+      }));
 
     } catch (e) {
-      alert('Path validation failed or error: ' + e);
+      alert('Error finding path: ' + e);
       setActivePath(null);
     } finally {
       setIsPathLoading(false);
     }
   };
 
+  const handleClearPath = () => {
+    setActivePath(null);
+  };
+
   return (
     <div className="App">
-      <PathControl onFindPath={handleFindPath} isLoading={isPathLoading} />
+      <PathControl
+        sourceId={pathSourceId}
+        targetId={pathTargetId}
+        onSetSource={setPathSourceId}
+        onSetTarget={setPathTargetId}
+        onFindPath={handleFindPath}
+        onClearPath={handleClearPath}
+        isLoading={isPathLoading}
+      />
 
       <GraphRenderer
         ref={graphRef}
@@ -198,108 +204,105 @@ function App() {
         pathEdges={pathEdges}
         pathNodes={pathNodesSet}
       />
-      {/* ... (stats div) ... */}
-      <div style={{
-        /* ... existing style ... */
-        display: 'none' // Optionally hide if reusing new PathControl? 
-        // No, keep stats.
-      }}
-      >
-        {/* ... (Searchbox etc) ... */}
-      </div>
 
-      {/* Re-using existing overlays logic implicitly by not deleting it */}
-
-      <div style={{
-        position: 'fixed',
-        top: 10,
-        left: 220, // Moved to allow PathControl
-        width: '300px',
-        color: 'white',
-        background: 'rgba(0,0,0,0.6)',
-        padding: '12px',
-        borderRadius: '8px',
-        pointerEvents: 'none',
-        userSelect: 'none',
-        zIndex: 9999,
-        backdropFilter: 'blur(4px)',
-        fontFamily: 'monospace',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px'
-      }}>
-        <div style={{ fontWeight: 'bold', fontSize: '1rem', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '4px' }}>
-          Graph Routing Visualization
-        </div>
-
-        <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>
-          Total Nodes: {displayNodes.length} &middot; Edges: {displayEdges.length + displayOverlayEdges.bridges.length + displayOverlayEdges.shortcuts.length} (Path: {activePath ? activePath.length : 0})
-        </div>
-
-        {/* Search Box */}
-        <div style={{ display: 'flex', gap: '4px', pointerEvents: 'auto' }}>
-          <input
-            type="text"
-            placeholder="Node ID"
-            value={searchId}
-            onChange={(e) => setSearchId(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
-            style={{
-              background: 'rgba(255,255,255,0.1)',
-              border: '1px solid rgba(255,255,255,0.3)',
-              color: 'white',
-              borderRadius: '4px',
-              padding: '4px',
-              flex: 1
-            }}
-          />
-          <button
-            onClick={handleSearch}
-            style={{
-              background: '#444',
-              color: 'white',
-              border: '1px solid #666',
-              borderRadius: '4px',
-              padding: '4px 8px',
-              cursor: 'pointer'
-            }}
-          >
-            Search
-          </button>
-        </div>
-
+      {isStatsCollapsed ? (
         <button
-          onClick={() => graphRef.current?.resetView()}
+          onClick={() => setIsStatsCollapsed(false)}
+          title="Open Stats & Search"
           style={{
-            pointerEvents: 'auto',
-            background: '#444',
-            color: 'white',
-            border: '1px solid #666',
-            borderRadius: '4px',
-            padding: '4px 8px',
-            fontSize: '0.8rem',
-            cursor: 'pointer',
-            alignSelf: 'flex-start'
+            position: 'fixed', top: 10, left: 10,
+            background: '#333', color: 'white',
+            border: '1px solid #555', borderRadius: '50%',
+            width: '40px', height: '40px', fontSize: '20px',
+            cursor: 'pointer', zIndex: 9999,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
           }}
         >
-          Fit View
+          🔍
         </button>
-
-        {selectedNode && (
+      ) : (
+        <div style={{
+          position: 'fixed',
+          top: 10,
+          left: 10,
+          width: '300px',
+          color: 'white',
+          background: 'rgba(30,30,30,0.95)',
+          padding: '12px',
+          borderRadius: '8px',
+          zIndex: 9999,
+          backdropFilter: 'blur(4px)',
+          fontFamily: 'monospace',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+          border: '1px solid #444'
+        }}>
           <div style={{
-            marginTop: '8px',
-            paddingTop: '8px',
-            borderTop: '1px solid rgba(255,255,255,0.2)',
-            fontSize: '0.85rem'
+            fontWeight: 'bold', fontSize: '1rem', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '4px',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center'
           }}>
-            <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>Selected Node</div>
-            <div>ID: {selectedNode.node_id}</div>
-            <div>Shard: {selectedNode.shard_id}</div>
-            <div>Type: {selectedNode.type}</div>
-            <div>Loc: ({selectedNode.x.toFixed(1)}, {selectedNode.y.toFixed(1)})</div>
+            <span>Find node</span>
+            <button onClick={() => setIsStatsCollapsed(true)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer' }}>✕</button>
           </div>
-        )}
-      </div>
+
+          <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>
+            Total Nodes: {displayNodes.length} &middot; Edges: {displayEdges.length + displayOverlayEdges.bridges.length + displayOverlayEdges.shortcuts.length} (Path: {activePath ? activePath.length : 0})
+          </div>
+
+          {/* Search Box */}
+          <div style={{ display: 'flex', gap: '4px', pointerEvents: 'auto' }}>
+            <input
+              type="text"
+              placeholder="Node ID"
+              value={searchId}
+              onChange={(e) => setSearchId(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
+              style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.3)', color: 'white', borderRadius: '4px', padding: '4px', flex: 1 }}
+            />
+            <button
+              onClick={handleSearch}
+              style={{ background: '#444', color: 'white', border: '1px solid #666', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer' }}
+            >
+              Search
+            </button>
+          </div>
+
+          <button
+            onClick={() => graphRef.current?.resetView()}
+            style={{ background: '#444', color: 'white', border: '1px solid #666', borderRadius: '4px', padding: '4px 8px', fontSize: '0.8rem', cursor: 'pointer', alignSelf: 'flex-start' }}
+          >
+            Fit View
+          </button>
+
+          {selectedNode && (
+            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', fontSize: '0.85rem' }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>Selected Node</div>
+              <div>ID: {selectedNode.node_id}</div>
+              <div>Shard: {selectedNode.shard_id}</div>
+              <div>Type: {selectedNode.type}</div>
+              <div>Loc: ({selectedNode.x.toFixed(1)}, {selectedNode.y.toFixed(1)})</div>
+
+              <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+                <button
+                  onClick={() => setPathSourceId(selectedNode.node_id)}
+                  style={{ flex: 1, background: '#2196F3', border: 'none', color: 'white', padding: '2px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Set Src
+                </button>
+                <button
+                  onClick={() => setPathTargetId(selectedNode.node_id)}
+                  style={{ flex: 1, background: '#4CAF50', border: 'none', color: 'white', padding: '2px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Set Dst
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <ShardManager
         shards={managedShards}
