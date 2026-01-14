@@ -9,16 +9,23 @@ Dataflow job for distributed graph routing preprocessing. This pipeline processe
 
 ## Installation
 
-To install the project dependencies for development and testing:
+This project uses `uv` for reproducible dependency management.
 
-```bash
-# Recommended: Create a virtual environment
-python3 -m venv venv
-source venv/bin/activate
+1.  **Install uv** (if not already installed):
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```
 
-# Install the package in editable mode (CRITICAL for test discovery)
-pip install -e ".[gcp]"
-```
+2.  **Sync dependencies**:
+    This command creates the virtual environment (`.venv`) and ensures all dependencies (including `pip` and the correct `protobuf` version) are installed with the exact versions specified in `uv.lock`.
+    ```bash
+    uv sync
+    ```
+
+3.  **Activate the environment**:
+    ```bash
+    source .venv/bin/activate
+    ```
 
 ## Running Tests
 
@@ -46,14 +53,15 @@ To run the Dataflow job (requires GCP authentication):
 
 2.  Run the pipeline script:
     ```bash
-  python3 contractions/main.py \
+  python3 -m contractions.main \
       --project repetitive-shortest-paths \
       --temp_location gs://repetitive_shortest_paths_contractions_dataflow/temp \
       --input_nodes_table repetitive-shortest-paths:graph_data.nodes \
       --input_edges_table repetitive-shortest-paths:graph_data.edges \
       --bt_instance routing-instance \
       --shortcuts_table shortcuts \
-      --intra_table intra_edges
+      --shards_table shards \
+      --overlay_table overlay_graph
     ```
 
 ## Deploying to Dataflow
@@ -61,7 +69,7 @@ To run the Dataflow job (requires GCP authentication):
 To run the job on the Dataflow service (instead of locally), append the `Runner` and `Region` arguments:
 
 ```bash
-python3 contractions/main.py \
+python3 -m contractions.main \
   --project repetitive-shortest-paths \
   --temp_location gs://repetitive_shortest_paths_contractions_dataflow/temp \
   --staging_location gs://repetitive_shortest_paths_contractions_dataflow/staging \
@@ -69,7 +77,8 @@ python3 contractions/main.py \
   --input_edges_table repetitive-shortest-paths:graph_data.edges \
   --bt_instance routing-instance \
   --shortcuts_table shortcuts \
-  --intra_table intra_edges \
+  --shards_table shards \
+  --overlay_table overlay_graph \
   --runner DataflowRunner \
   --region us-central1 \
   --worker_machine_type e2-standard-2 \

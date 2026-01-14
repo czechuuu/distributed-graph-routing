@@ -41,20 +41,24 @@ gcloud projects add-iam-policy-binding repetitive-shortest-paths \
 # Create a BT instance - use only 1 node
 gcloud bigtable instances create routing-instance \
     --display-name="Routing Instance" \
-    --cluster-config=id=routing-cluster,zone=us-central1-a,nodes=1 \
-    --instance-type=PRODUCTION
+    --cluster-config=id=routing-cluster,zone=us-central1-a,nodes=1
 
 # 2. Configure 'cbt' to use your project and instance
 echo project = repetitive-shortest-paths > ~/.cbtrc
 echo instance = routing-instance >> ~/.cbtrc
 
 # 3. Create the Tables
+cbt createtable shards
 cbt createtable shortcuts
-cbt createtable intra_edges
+cbt createtable node_index
+cbt createtable overlay_graph
 
-# 4. Create the Column Family 'cf' in BOTH tables
+# 4. Create the Column Family 'cf' in all tables
+cbt createfamily shards cf
 cbt createfamily shortcuts cf
 cbt createfamily intra_edges cf
+cbt createfamily node_index cf
+cbt createfamily overlay_graph cf
 ```
 5. I added GCP permissions to build docker images and push them to gcr - it's usefule for the dataflow job so that when scaling the new workers don't need to build the dependencies.
 ```
