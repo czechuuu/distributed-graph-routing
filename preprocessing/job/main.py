@@ -1,8 +1,10 @@
 import functions_framework
-import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from google.cloud import bigquery
 from preprocessing.dataflow.pipeline import create_pipeline
+
+import os
+os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
 PROJECT_ID = "repetitive-shortest-paths"
 DATASET_ID = "graph_data"
@@ -11,7 +13,8 @@ TEMP_LOCATION = "gs://repetitive_shortest_paths_contractions_dataflow/temp"
 STAGING_LOCATION = "gs://repetitive_shortest_paths_contractions_dataflow/staging"
 INSTANCE_ID = "routing-instance"
 SHORTCUTS_TABLE = "shortcuts"
-INTRA_TABLE = "intra_edges"
+SHARDS_TABLE = "shards"
+OVERLAY_TABLE = "overlay"
 REGION = "us-central1"
 
 @functions_framework.cloud_event
@@ -133,13 +136,16 @@ def check_and_trigger_pipeline(client, current_table_name):
         print(f"Current table ({current_table_name}) is older than other table. Waiting for other trigger (or it already happened).")
 
 def trigger_pipeline():
+    current_dir = pathlib.Path(__file__).parent.absolute()
+    setup_file_path = str(current_dir / "setup.py")
+
     pipeline_args = [
         f"--project={PROJECT_ID}",
         f"--runner=DataflowRunner",
         f"--region={REGION}",
         f"--temp_location={TEMP_LOCATION}",
         f"--staging_location={STAGING_LOCATION}",
-        f"--setup_file=./setup.py",
+        f"--setup_file={setup_file_path}",
     ]
     
     create_pipeline(
@@ -149,7 +155,8 @@ def trigger_pipeline():
         input_edges=f"{PROJECT_ID}:{DATASET_ID}.edges",
         instance=INSTANCE_ID,
         shortcuts_table=SHORTCUTS_TABLE,
-        intra_table=INTRA_TABLE,
+        shards_table=SHARDS_TABLE,
+        overlay_table=OVERLAY_TABLE,
         pipeline_args=pipeline_args
     )
     print("Pipeline triggered successfully.")

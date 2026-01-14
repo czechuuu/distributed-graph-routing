@@ -1,31 +1,25 @@
 
 import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions, GoogleCloudOptions
+from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
 from google.cloud.bigtable import row
-import struct
-from storage_types import bigtable_storage_pb2
 
 from preprocessing.dataflow.io_wrappers import ReadNodesFromBQ, ReadEdgesFromBQ, WriteToBT
-from preprocessing.dataflow.model import Node, Edge
 from preprocessing.dataflow.algo import build_shard_graph, identify_boundary_nodes, compute_shortcuts
 
 from enum import Enum
 
-class EmitShardsForEdge(beam.DoFn):
-    def process(self, element, *args, **kwargs):
-        """
-        Takes (edge, shard_u, shard_v)
-        Yields out (shard_id, edge)
-        """
-        edge, shard_u, shard_v = element
         
-        if shard_u is None or shard_v is None:
-            return
-
-        yield (shard_u, edge)
-
-        if shard_u != shard_v:
-            yield (shard_v, edge)
+class EmitShardsForEdge(beam.DoFn):
+    """
+    Takes (edge, shard_u, shard_v)
+    Yields out (shard_id, edge)
+    """
+    def process(self, element, *args, **kwargs):
+        edge, shard_u, shard_v = element
+        if shard_u is not None and shard_v is not None:
+            yield (shard_u, edge)
+            if shard_u != shard_v:
+                yield (shard_v, edge)
 
 class ProcessShard(beam.DoFn):
     def process(self, element):
@@ -62,6 +56,7 @@ class MutationType(Enum):
 
 class CreatePathMutations(beam.DoFn):
     def process(self, element):
+        from storage_types import bigtable_storage_pb2
         shard_id, shortcuts, inter_shard_edges = element
         
         # Iterate over shortcuts and save paths
@@ -155,7 +150,7 @@ class CreateIntraMutations(beam.DoFn):
         direct_row.set_cell('cf', 'shard_graph_proto', shard_proto.SerializeToString())
         yield direct_row
 
-def create_pipeline(project, temp_location, input_nodes, input_edges, instance, shortcuts_table, shards_table, overlay_table, pipeline_args=None):
+def create_pipeline(project, temp_location, input_nodes, input_edges, instance, shortcuts_table, shards_table, overlay_table, setup_file, pipeline_args=None):
     if pipeline_args is None:
         pipeline_args = []
 
@@ -170,14 +165,14 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
 
     # Initialize PipelineOptions with passed args (e.g. --runner, --region) using flags argument.
     options = PipelineOptions(flags=pipeline_args)
-    options.view_as(SetupOptions).save_main_session = True
+    options.view_as(SetupOptions).save_main_session = False
     
     google_cloud_options = options.view_as(beam.options.pipeline_options.GoogleCloudOptions) 
     google_cloud_options.project = project
     google_cloud_options.temp_location = temp_location
     
     setup_options = options.view_as(SetupOptions)
-    setup_options.setup_file = './setup.py'
+    setup_options.setup_file = setup_file
     
     with beam.Pipeline(options=options) as p:
         nodes = p | "ReadNodes" >> ReadNodesFromBQ(input_nodes)
