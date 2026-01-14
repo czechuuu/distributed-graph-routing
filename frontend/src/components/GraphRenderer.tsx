@@ -1,22 +1,22 @@
 import React, { useRef, useEffect, useState } from 'react';
-import type { GraphData, NodeLocation } from '../domain/types';
+import type { NodeLocation, Edge, OverlayGraph } from '../domain/types';
+import { NodeType } from '../domain/types';
 
 interface GraphRendererProps {
-    data: GraphData;
+    nodes: NodeLocation[];
+    intraEdges: Edge[];
+    overlayEdges: OverlayGraph; // Contains bridges and shortcuts
+    onNodeClick?: (node: NodeLocation | null) => void;
+    selectedNodeId?: string | null;
 }
 
 export interface GraphRendererHandle {
     resetView: () => void;
     focusNode: (nodeId: string) => void;
+    fitToNodes: (nodes: NodeLocation[]) => void;
 }
 
-interface GraphRendererProps {
-    data: GraphData;
-    onNodeClick?: (node: NodeLocation | null) => void;
-    selectedNodeId?: string | null;
-}
-
-export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRendererProps>(({ data, onNodeClick, selectedNodeId }, ref) => {
+export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRendererProps>(({ nodes, intraEdges, overlayEdges, onNodeClick, selectedNodeId }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
     const [isDragging, setIsDragging] = useState(false);
@@ -25,10 +25,14 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
 
     React.useImperativeHandle(ref, () => ({
         resetView: () => {
-            setTransform({ x: 0, y: 0, k: 1 });
+            if (nodes.length === 0) {
+                setTransform({ x: 0, y: 0, k: 1 });
+            } else {
+                fitToNodesInternal(nodes);
+            }
         },
         focusNode: (nodeId: string) => {
-            const node = data.nodes.find(n => n.node_id === nodeId);
+            const node = nodes.find(n => n.node_id === nodeId);
             if (node && canvasRef.current) {
                 const targetScale = 2.5;
                 const cx = canvasRef.current.width / 2;
@@ -39,8 +43,41 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
                     y: cy - node.y * targetScale
                 });
             }
-        }
+        },
+        fitToNodes: (nodesToFit: NodeLocation[]) => fitToNodesInternal(nodesToFit)
     }));
+
+    const fitToNodesInternal = (nodesToFit: NodeLocation[]) => {
+        if (!nodesToFit.length || !canvasRef.current) return;
+
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        nodesToFit.forEach(n => {
+            if (n.x < minX) minX = n.x;
+            if (n.x > maxX) maxX = n.x;
+            if (n.y < minY) minY = n.y;
+            if (n.y > maxY) maxY = n.y;
+        });
+
+        const padding = 50;
+        const width = maxX - minX + padding * 2;
+        const height = maxY - minY + padding * 2;
+
+        if (width <= 0 || height <= 0) return;
+
+        const canvas = canvasRef.current;
+        const scaleX = canvas.width / width;
+        const scaleY = canvas.height / height;
+        const scale = Math.min(scaleX, scaleY, 2);
+
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+
+        setTransform({
+            k: scale,
+            x: canvas.width / 2 - centerX * scale,
+            y: canvas.height / 2 - centerY * scale
+        });
+    };
 
     const draw = () => {
         const canvas = canvasRef.current;
@@ -48,93 +85,109 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Clear
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
         ctx.save();
-        // Apply transform
         ctx.translate(transform.x, transform.y);
         ctx.scale(transform.k, transform.k);
 
-        // Draw Edges - Pass 1: Unselected
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = '#999';
-        ctx.beginPath();
-        // Accelerate lookup? For now simple loop O(E*N) is bad if N large.
-        // Build map
+        // Prep Data
         const nodeMap = new Map<string, NodeLocation>();
-        data.nodes.forEach(n => nodeMap.set(n.node_id, n));
+        nodes.forEach(n => nodeMap.set(n.node_id, n));
 
-        // Separate edges
-        const normalEdges: typeof data.edges = [];
-        const highlightedEdges: typeof data.edges = [];
+        // Neighbor/Highlight tracking
         const neighborIds = new Set<string>();
+        const allEdges = [...intraEdges, ...overlayEdges.bridges, ...overlayEdges.shortcuts];
 
-        data.edges.forEach(edge => {
-            if (selectedNodeId && (edge.from_node_id === selectedNodeId || edge.to_node_id === selectedNodeId)) {
-                highlightedEdges.push(edge);
-                neighborIds.add(edge.from_node_id === selectedNodeId ? edge.to_node_id : edge.from_node_id);
-            } else {
-                normalEdges.push(edge);
-            }
-        });
+        if (selectedNodeId) {
+            allEdges.forEach(e => {
+                if (e.from_node_id === selectedNodeId) neighborIds.add(e.to_node_id);
+                if (e.to_node_id === selectedNodeId) neighborIds.add(e.from_node_id);
+            });
+        }
 
-        // Draw normal
-        normalEdges.forEach(edge => {
+        const drawEdge = (edge: Edge, color: string, width: number, dashed: boolean) => {
             const u = nodeMap.get(edge.from_node_id);
             const v = nodeMap.get(edge.to_node_id);
             if (u && v) {
+                ctx.beginPath();
                 ctx.moveTo(u.x, u.y);
                 ctx.lineTo(v.x, v.y);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = width / transform.k;
+                if (dashed) ctx.setLineDash([5 / transform.k, 5 / transform.k]);
+                else ctx.setLineDash([]);
+                ctx.stroke();
             }
-        });
-        ctx.stroke();
+        };
 
-        // Draw Edges - Pass 2: Highlighted
-        if (highlightedEdges.length > 0) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#F0E68C'; // Khaki (dusty pastel yellow)
-            ctx.lineWidth = 1.5;
-            highlightedEdges.forEach(edge => {
-                const u = nodeMap.get(edge.from_node_id);
-                const v = nodeMap.get(edge.to_node_id);
-                if (u && v) {
-                    ctx.moveTo(u.x, u.y);
-                    ctx.lineTo(v.x, v.y);
+        // LAYER 1: Shortcuts (Translucent, Dashed)
+        overlayEdges.shortcuts.forEach(e => {
+            drawEdge(e, 'rgba(150, 150, 150, 0.5)', 1, true);
+        });
+
+        // LAYER 2: Intra-Edges (Thin, Solid)
+        intraEdges.forEach(e => {
+            drawEdge(e, '#888', 1, false);
+        });
+
+        // LAYER 3: Bridges (Thick, Distinct Shade - Blue/Purple)
+        overlayEdges.bridges.forEach(e => {
+            drawEdge(e, '#6A0DAD', 2.5, false); // Purple
+        });
+
+        // HIGHLIGHT EDGES PASS (Overdraw)
+        if (selectedNodeId) {
+            allEdges.forEach(e => {
+                if (e.from_node_id === selectedNodeId || e.to_node_id === selectedNodeId) {
+                    drawEdge(e, '#F0E68C', 2.5, false);
                 }
             });
-            ctx.stroke();
         }
 
-        // Draw Nodes
-        data.nodes.forEach(node => {
+        // NODES
+        const internalNodes = nodes.filter(n => n.type === NodeType.INTERNAL);
+        const boundaryNodes = nodes.filter(n => n.type === NodeType.BOUNDARY);
+
+        const drawNode = (node: NodeLocation) => {
             ctx.beginPath();
             const isSelected = node.node_id === selectedNodeId;
             const isNeighbor = neighborIds.has(node.node_id);
+            const isBoundary = node.type === NodeType.BOUNDARY;
 
-            ctx.fillStyle = isSelected ? '#ffff00' : '#ff4400';
-            const radius = isSelected ? 6 : 3;
-
-            ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
-            ctx.fill();
+            let radius = isBoundary ? 6 : 3;
+            let fill = isBoundary ? '#FF3333' : '#AA4444';
 
             if (isSelected) {
+                radius *= 1.5;
+                fill = '#FFFF00';
+            }
+
+            ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
+            ctx.fillStyle = fill;
+            ctx.fill();
+
+            // Outline
+            ctx.setLineDash([]);
+            if (isSelected) {
                 ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 1 / transform.k;
+                ctx.lineWidth = 1.5 / transform.k;
                 ctx.stroke();
             } else if (isNeighbor) {
-                ctx.strokeStyle = '#F0E68C'; // Matches highlighted edges
+                ctx.strokeStyle = '#F0E68C';
                 ctx.lineWidth = 1.2 / transform.k;
                 ctx.stroke();
             }
-        });
+        };
+
+        internalNodes.forEach(drawNode);
+        boundaryNodes.forEach(drawNode);
 
         ctx.restore();
     };
 
     useEffect(() => {
         draw();
-    }, [data, transform, selectedNodeId]);
+    }, [nodes, intraEdges, overlayEdges, transform, selectedNodeId]);
 
     // Handle Resize
     useEffect(() => {
@@ -151,24 +204,16 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
     }, []);
 
     const handleWheel = (e: React.WheelEvent) => {
-        // e.preventDefault() is implicitly handled by React for wheel event in some cases, 
-        // but explicit preventDefault on ref is safer for non-passive events. 
-        // Here we just calculate state.
-
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
 
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
-
         const scaleAmount = -e.deltaY * 0.001;
         const newScale = Math.max(0.1, Math.min(10, transform.k * (1 + scaleAmount)));
 
-        // Calculate world coordinates of mouse before zoom
         const wx = (mx - transform.x) / transform.k;
         const wy = (my - transform.y) / transform.k;
-
-        // Calculate new translation to keep world coordinates under mouse fixed
         const newX = mx - wx * newScale;
         const newY = my - wy * newScale;
 
@@ -204,18 +249,15 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
         if (!rect) return;
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
-
-        // Transform to world space
         const wx = (mx - transform.x) / transform.k;
         const wy = (my - transform.y) / transform.k;
 
         let clickedNode: NodeLocation | null = null;
-        for (const node of data.nodes) {
-            // Hit radius 8
-            if (Math.hypot(node.x - wx, node.y - wy) < 8) {
-                clickedNode = node;
-                break;
-            }
+        const checkHit = (n: NodeLocation) => Math.hypot(n.x - wx, n.y - wy) < 8;
+
+        clickedNode = nodes.find(n => n.type === NodeType.BOUNDARY && checkHit(n)) || null;
+        if (!clickedNode) {
+            clickedNode = nodes.find(n => n.type === NodeType.INTERNAL && checkHit(n)) || null;
         }
         onNodeClick(clickedNode);
     };
