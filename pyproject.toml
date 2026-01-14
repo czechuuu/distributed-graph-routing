@@ -12,4 +12,5 @@ dependencies = [
     "protobuf==6.31.1",
     "grpcio<1.66.0", # Pinned for Apache Beam compatibility
     "pip", # Required for Apache Beam stager
+    "setuptools",
 ]
