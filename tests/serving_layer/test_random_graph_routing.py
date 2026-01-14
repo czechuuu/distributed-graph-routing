@@ -41,7 +41,7 @@ class LocalGraphFacade(GraphFacade):
 
 class TestRandomGraphRouting(unittest.TestCase):
     
-    def generate_random_graph(self, n=500, p=0.02, num_shards=5):
+    def generate_random_graph(self, n=5000, p=0.02, num_shards=50):
         """Generates a connected random graph and partitions it."""
         while True:
             # simple Erdos-Renyi graph
@@ -155,7 +155,6 @@ class TestRandomGraphRouting(unittest.TestCase):
 
         # Inject Mock State into App
         state.facade = facade
-        state.node_index = node_to_shard
         
         # Run random queries
         num_queries = 50
@@ -175,7 +174,10 @@ class TestRandomGraphRouting(unittest.TestCase):
                 expected_len = None
             
             # 2. Distributed Engine via FastAPI
-            response = client.post("/route", json={"start_node": u, "end_node": v})
+            response = client.post("/route", json={
+                "start_node": u, "start_node_shard": node_to_shard[u],
+                "end_node": v, "end_node_shard": node_to_shard[v]
+            })
             
             if response.status_code == 200:
                 result = response.json()
