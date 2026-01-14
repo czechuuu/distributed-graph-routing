@@ -21,8 +21,6 @@ message Edge {
     fixed64 to_node_id = 2;
     uint32 weight = 3;
     bool bidirectional = 4;
-    repeated fixed64 path = 5 [packed = true];
-
 }
 
 message NodeLocation {
@@ -45,8 +43,9 @@ message ShardLookup {
     fixed64 shard_id = 1;
 }
 
-
-// Stored in ?, every worker loads it on startup
+// BIGTABLE TABLE: overlay_graph
+// ROW KEY: "O#"
+// Single row with all the data.
 message OverlayGraph {
     // Bridges (connecting different shards) 
     repeated Edge bridges = 1;

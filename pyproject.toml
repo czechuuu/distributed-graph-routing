@@ -1,0 +1,15 @@
+[project]
+name = "distributed-graph-routing"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12, <3.13"
+dependencies = [
+    "apache-beam[gcp]==2.70.0",
+    "google-cloud-bigtable",
+    "networkx>=2.5",
+    "crcmod",
+    "protobuf==6.31.1",
+    "grpcio<1.66.0", # Pinned for Apache Beam compatibility
+    "pip", # Required for Apache Beam stager
+]

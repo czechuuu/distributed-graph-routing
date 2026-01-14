@@ -12,7 +12,7 @@ from shared.algo import build_shard_graph, identify_boundary_nodes, compute_shor
 from enum import Enum
 
 class EmitShardsForEdge(beam.DoFn):
-    def process(self, element):
+    def process(self, element, *args, **kwargs):
         """
         Takes (edge, shard_u, shard_v)
         Yields out (shard_id, edge)
@@ -60,67 +60,95 @@ class MutationType(Enum):
     SHORTCUT = 1
     INTRA = 2
 
-class CreateMutations(beam.DoFn):
-    def __init__(self, table_type):
-        self.table_type = table_type
-
+class CreatePathMutations(beam.DoFn):
     def process(self, element):
-        if self.table_type == MutationType.SHORTCUT:
-            shard_id, shortcuts, inter_shard_edges = element
-            row_key = f"{shard_id}".encode('utf-8')
-            direct_row = row.DirectRow(row_key)
-            
-            # Write Shortcuts as Protobuf
-            overlay_proto = bigtable_storage_pb2.OverlayGraph()
-            
-            for s in shortcuts:
+        shard_id, shortcuts, inter_shard_edges = element
+        
+        # Iterate over shortcuts and save paths
+        for s in shortcuts:
+            if s.path:
+                path_proto = bigtable_storage_pb2.ShortcutPath()
+                path_proto.nodes.extend(s.path)
                 
-                pb_edge = overlay_proto.shortcuts.add()
-                pb_edge.from_node_id = s.u
-                pb_edge.to_node_id = s.v
-                pb_edge.weight = int(s.weight) 
-                if s.path:
-                    pb_edge.path.extend(s.path)
-            
-            # Serialize and write
-            serialized_shortcuts = overlay_proto.SerializeToString()
-            direct_row.set_cell('cf', 'shortcuts_proto', serialized_shortcuts)
-    
-            # Write Inter-shard Edges
-            # Use OverlayGraph.bridges
-            bridges_proto = bigtable_storage_pb2.OverlayGraph()
-            for e in inter_shard_edges:
-                pb_edge = bridges_proto.bridges.add()
-                pb_edge.from_node_id = e.u
-                pb_edge.to_node_id = e.v
-                pb_edge.weight = int(e.weight)
-            
-            direct_row.set_cell('cf', 'inter_edges_proto', bridges_proto.SerializeToString())
+                row_key = f"P#{s.u}#{s.v}".encode('utf-8')
+                direct_row = row.DirectRow(row_key)
+                direct_row.set_cell('cf', 'val', path_proto.SerializeToString())
+                yield direct_row
 
-            yield direct_row
+class ExtractOverlayEdges(beam.DoFn):
+    def process(self, element):
+        shard_id, shortcuts, inter_shard_edges = element
+        
+        overlay_proto = bigtable_storage_pb2.OverlayGraph()
+        
+        # 1. Add Shortcuts (Topology only)
+        for s in shortcuts:
+            pb_edge = overlay_proto.shortcuts.add()
+            pb_edge.from_node_id = s.u
+            pb_edge.to_node_id = s.v
+            pb_edge.weight = int(s.weight) 
+            # Note: Path is NOT added here anymore
+            
+        # 2. Add Inter-shard Edges (Bridges)
+        for e in inter_shard_edges:
+            pb_edge = overlay_proto.bridges.add()
+            pb_edge.from_node_id = e.u
+            pb_edge.to_node_id = e.v
+            pb_edge.weight = int(e.weight)
+            
+        yield overlay_proto
 
-        elif self.table_type == MutationType.INTRA:
-            shard_id, G = element
-            row_key = f"{shard_id}".encode('utf-8')
-            direct_row = row.DirectRow(row_key)
-            
-            # Write Intra-shard Edges (ShardGraph)
-            shard_proto = bigtable_storage_pb2.ShardGraph()
-            
-            for u, v, d in G.edges(data=True):
-                # Filter only internal edges
-                u_node = G.nodes[u]
-                v_node = G.nodes[v]
-                if u_node.get('shard_id') == shard_id and v_node.get('shard_id') == shard_id:
-                     pb_edge = shard_proto.edges.add()
-                     pb_edge.from_node_id = u
-                     pb_edge.to_node_id = v
-                     pb_edge.weight = int(d['weight'])
-            
-            direct_row.set_cell('cf', 'shard_graph_proto', shard_proto.SerializeToString())
-            yield direct_row
+class MergeOverlayGraphs(beam.CombineFn):
+    def create_accumulator(self):
+        return bigtable_storage_pb2.OverlayGraph()
 
-def create_pipeline(project, temp_location, input_nodes, input_edges, instance, shortcuts_table, intra_table, pipeline_args=None):
+    def add_input(self, accumulator, element):
+        accumulator.shortcuts.extend(element.shortcuts)
+        accumulator.bridges.extend(element.bridges)
+        return accumulator
+
+    def merge_accumulators(self, accumulators):
+        merged = bigtable_storage_pb2.OverlayGraph()
+        for acc in accumulators:
+            merged.shortcuts.extend(acc.shortcuts)
+            merged.bridges.extend(acc.bridges)
+        return merged
+
+    def extract_output(self, accumulator):
+        return accumulator
+
+class CreateOverlayMutation(beam.DoFn):
+    def process(self, element):
+        # element is the merged OverlayGraph
+        row_key = b"O#"
+        direct_row = row.DirectRow(row_key)
+        direct_row.set_cell('cf', 'val', element.SerializeToString())
+        yield direct_row
+
+
+class CreateIntraMutations(beam.DoFn):
+    def process(self, element):
+        shard_id, G = element
+        row_key = f"{shard_id}".encode('utf-8')
+        direct_row = row.DirectRow(row_key)
+        
+        # --- 3. Write Intra-shard Edges (ShardGraph) ---
+        shard_proto = bigtable_storage_pb2.ShardGraph()
+        
+        for u, v, d in G.edges(data=True):
+            # Filtrujemy tylko wewnętrzne krawędzie
+            u_node = G.nodes[u]
+            v_node = G.nodes[v]
+            if u_node.get('shard_id') == shard_id and v_node.get('shard_id') == shard_id:
+                 pb_edge = shard_proto.edges.add()
+                 pb_edge.from_node_id = u
+                 pb_edge.to_node_id = v
+                 pb_edge.weight = int(d['weight'])
+        
+        direct_row.set_cell('cf', 'shard_graph_proto', shard_proto.SerializeToString())
+        yield direct_row
+
+def create_pipeline(project, temp_location, input_nodes, input_edges, instance, shortcuts_table, shards_table, overlay_table, pipeline_args=None):
     if pipeline_args is None:
         pipeline_args = []
 
@@ -217,14 +245,22 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
         # intra: (shard_id, graph)
         results = grouped | beam.ParDo(ProcessShard()).with_outputs('shortcuts', 'intra')
         
-        # Write Shortcuts
+        # 1. Write Shortcut Paths
         (results.shortcuts 
-         | "CreateShortcutMutations" >> beam.ParDo(CreateMutations(MutationType.SHORTCUT))
-         | "WriteShortcuts" >> WriteToBT(project, instance, shortcuts_table)
+         | "CreatePathMutations" >> beam.ParDo(CreatePathMutations())
+         | "WritePaths" >> WriteToBT(project, instance, shortcuts_table)
+        )
+        
+        # 2. Extract, Merge and Write Overlay Graph
+        (results.shortcuts
+         | "ExtractOverlayEdges" >> beam.ParDo(ExtractOverlayEdges())
+         | "MergeOverlayGraphs" >> beam.CombineGlobally(MergeOverlayGraphs())
+         | "CreateOverlayMutation" >> beam.ParDo(CreateOverlayMutation())
+         | "WriteOverlay" >> WriteToBT(project, instance, overlay_table)
         )
         
         # Write Intra-shard edges
         (results.intra 
-         | "CreateIntraMutations" >> beam.ParDo(CreateMutations(MutationType.INTRA))
-         | "WriteIntra" >> WriteToBT(project, instance, intra_table)
+         | "CreateIntraMutations" >> beam.ParDo(CreateIntraMutations())
+         | "WriteIntra" >> WriteToBT(project, instance, shards_table)
         )

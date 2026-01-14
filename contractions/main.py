@@ -11,7 +11,8 @@ def run(argv=None):
     parser.add_argument('--input_edges_table', required=True, help='BigQuery table for edges')
     parser.add_argument('--bt_instance', required=True, help='BigTable Instance ID')
     parser.add_argument('--shortcuts_table', required=True, help='BigTable table for shortcuts')
-    parser.add_argument('--intra_table', required=True, help='BigTable table for intra-shard edges')
+    parser.add_argument('--shards_table', required=True, help='BigTable table for shards (intra-shard edges)')
+    parser.add_argument('--overlay_table', required=True, help='BigTable table for overlay graph')
     
     known_args, pipeline_args = parser.parse_known_args(argv)
     
@@ -24,7 +25,8 @@ def run(argv=None):
         input_edges=known_args.input_edges_table,
         instance=known_args.bt_instance,
         shortcuts_table=known_args.shortcuts_table,
-        intra_table=known_args.intra_table,
+        shards_table=known_args.shards_table,
+        overlay_table=known_args.overlay_table,
         pipeline_args=pipeline_args
     )
 
