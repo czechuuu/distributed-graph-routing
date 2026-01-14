@@ -1,8 +1,6 @@
-cd job
-
 gcloud functions deploy graph-loader-function \
   --gen2 \
-  --runtime=python312 \
+  --runtime=python311 \
   --region=us-central1 \
   --source=. \
   --entry-point=process_graph_upload \

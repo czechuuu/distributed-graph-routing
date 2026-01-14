@@ -1,13 +1,15 @@
-import functions_framework
+import os
+import pathlib
 from datetime import timedelta
 from google.cloud import bigquery
-from preprocessing.dataflow.pipeline import create_pipeline
+from dataflow.pipeline import create_pipeline
 
-import os
+# Set protobuf implementation to python to avoid version conflicts in some environments
 os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
 PROJECT_ID = "repetitive-shortest-paths"
 DATASET_ID = "graph_data"
+
 # Constants for Dataflow
 TEMP_LOCATION = "gs://repetitive_shortest_paths_contractions_dataflow/temp"
 STAGING_LOCATION = "gs://repetitive_shortest_paths_contractions_dataflow/staging"
@@ -17,13 +19,14 @@ SHARDS_TABLE = "shards"
 OVERLAY_TABLE = "overlay"
 REGION = "us-central1"
 
-@functions_framework.cloud_event
-def process_graph_upload(cloud_event):
-    data = cloud_event.data
-    bucket = data["bucket"]
-    file_name = data["name"]
+def handle_file_upload(bucket, file_name):
+    """
+    Main logic to handle the file upload:
+    1. Determines file type (nodes vs edges).
+    2. Loads data into BigQuery.
+    3. Triggers Dataflow pipeline if conditions are met.
+    """
     uri = f"gs://{bucket}/{file_name}"
-    
     client = bigquery.Client(project=PROJECT_ID)
 
     # Define schemas based ONLY on what is in the CSV
@@ -40,16 +43,16 @@ def process_graph_upload(cloud_event):
     ]
 
     table_name = ""
-    if "nodes" in file_name:
+    if file_name == "graph_data/nodes.csv":
         table_name = "nodes"
         table_id = f"{PROJECT_ID}.{DATASET_ID}.nodes"
         schema = node_csv_schema
-    elif "edges" in file_name:
+    elif file_name == "graph_data/edges.csv":
         table_name = "edges"
         table_id = f"{PROJECT_ID}.{DATASET_ID}.edges"
         schema = edge_schema
     else:
-        print(f"Unknown file type: {file_name}")
+        print(f"Skipping file: {file_name} (only graph_data/nodes.csv and graph_data/edges.csv are supported)")
         return
 
     # Load the CSV data
@@ -69,7 +72,7 @@ def process_graph_upload(cloud_event):
         return
 
     # Add and Update ShardId for the nodes table
-    if "nodes" in file_name:
+    if table_name == "nodes":
         setup_query = f"""
             -- Ensure ShardId column exists if it doesn't
             BEGIN
@@ -120,7 +123,8 @@ def check_and_trigger_pipeline(client, current_table_name):
     print(f"Nodes modified: {t_nodes}, Edges modified: {t_edges}")
 
     # Threshold for considering them "triggered together"
-    threshold = timedelta(minutes=10)
+    # 30 seconds to prevent triggers from consecutive test runs
+    threshold = timedelta(seconds=30)
     
     # Check if they are close in time
     time_diff = abs(t_nodes - t_edges)
@@ -145,7 +149,6 @@ def trigger_pipeline():
         f"--region={REGION}",
         f"--temp_location={TEMP_LOCATION}",
         f"--staging_location={STAGING_LOCATION}",
-        f"--setup_file={setup_file_path}",
     ]
     
     create_pipeline(
@@ -157,6 +160,7 @@ def trigger_pipeline():
         shortcuts_table=SHORTCUTS_TABLE,
         shards_table=SHARDS_TABLE,
         overlay_table=OVERLAY_TABLE,
+        setup_file=setup_file_path,
         pipeline_args=pipeline_args
     )
     print("Pipeline triggered successfully.")

@@ -3,8 +3,8 @@ import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
 from google.cloud.bigtable import row
 
-from preprocessing.dataflow.io_wrappers import ReadNodesFromBQ, ReadEdgesFromBQ, WriteToBT
-from preprocessing.dataflow.algo import build_shard_graph, identify_boundary_nodes, compute_shortcuts
+from .io_wrappers import ReadNodesFromBQ, ReadEdgesFromBQ, WriteToBT
+from .algo import build_shard_graph, identify_boundary_nodes, compute_shortcuts
 
 from enum import Enum
 
@@ -72,6 +72,7 @@ class CreatePathMutations(beam.DoFn):
 
 class ExtractOverlayEdges(beam.DoFn):
     def process(self, element):
+        from storage_types import bigtable_storage_pb2
         shard_id, shortcuts, inter_shard_edges = element
         
         overlay_proto = bigtable_storage_pb2.OverlayGraph()
@@ -94,6 +95,7 @@ class ExtractOverlayEdges(beam.DoFn):
 
 class MergeOverlayGraphs(beam.CombineFn):
     def create_accumulator(self):
+        from storage_types import bigtable_storage_pb2
         return bigtable_storage_pb2.OverlayGraph()
 
     def add_input(self, accumulator, element):
@@ -102,6 +104,7 @@ class MergeOverlayGraphs(beam.CombineFn):
         return accumulator
 
     def merge_accumulators(self, accumulators):
+        from storage_types import bigtable_storage_pb2
         merged = bigtable_storage_pb2.OverlayGraph()
         for acc in accumulators:
             merged.shortcuts.extend(acc.shortcuts)
@@ -122,6 +125,7 @@ class CreateOverlayMutation(beam.DoFn):
 
 class CreateIntraMutations(beam.DoFn):
     def process(self, element):
+        from storage_types import bigtable_storage_pb2
         shard_id, G = element
         row_key = f"S#{shard_id}".encode('utf-8')
         direct_row = row.DirectRow(row_key)
@@ -161,7 +165,7 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
         pipeline_args.append('--prebuild_sdk_container_engine=cloud_build')
         pipeline_args.append(f'--docker_registry_push_url=gcr.io/{project}/dataflow/graph-routing-worker-sdk')
         pipeline_args.append('--experiments=use_runner_v2')
-        pipeline_args.append(f'--sdk_container_image=docker.io/apache/beam_python3.12_sdk:{beam.version.__version__}')
+        pipeline_args.append(f'--sdk_container_image=docker.io/apache/beam_python3.11_sdk:{beam.version.__version__}')
 
     # Initialize PipelineOptions with passed args (e.g. --runner, --region) using flags argument.
     options = PipelineOptions(flags=pipeline_args)
@@ -193,11 +197,10 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
             node_id, data = element
             shard_ids = data['node_id_shard']
             edge_list = data['edges_u']
-            if not shard_ids:
-                return
-            shard_u = shard_ids[0]
-            for e in edge_list:
-                yield (e.v, (e, shard_u))
+            if shard_ids:
+                shard_u = shard_ids[0]
+                for e in edge_list:
+                    yield (e.v, (e, shard_u))
 
         # (Edge.v, (Edge, shard_u))
         edges_with_u_shard = (
@@ -215,11 +218,10 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
             node_id, data = element
             shard_ids = data['node_id_shard']
             edges_data = data['edges_with_u']
-            if not shard_ids:
-                return  
-            shard_v = shard_ids[0]
-            for (e, shard_u) in edges_data:
-                yield (e, shard_u, shard_v)
+            if shard_ids:
+                shard_v = shard_ids[0]
+                for (e, shard_u) in edges_data:
+                    yield (e, shard_u, shard_v)
                 
         edges_with_shards = (
             {'node_id_shard': node_id_shard, 'edges_with_u': edges_with_u_shard}

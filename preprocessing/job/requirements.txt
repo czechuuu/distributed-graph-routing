@@ -1,7 +1,0 @@
-functions-framework==3.*
-google-cloud-bigquery
-google-cloud-bigtable
-apache-beam[gcp]
-google-cloud-storage
-build
-setuptools

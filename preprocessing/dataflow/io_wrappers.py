@@ -2,7 +2,7 @@ import apache_beam as beam
 from apache_beam.io.gcp.bigquery import ReadFromBigQuery
 from apache_beam.io.gcp.bigtableio import WriteToBigTable
 from google.cloud.bigtable import row
-from preprocessing.dataflow.model import Node, Edge
+from .model import Node, Edge
 
 class ReadNodesFromBQ(beam.PTransform):
     def __init__(self, table):

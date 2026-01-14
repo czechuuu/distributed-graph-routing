@@ -1,7 +1,7 @@
 
 import networkx as nx
 from typing import List, Tuple, Set
-from preprocessing.dataflow.model import Node, Edge, Shortcut
+from .model import Node, Edge, Shortcut
 
 def build_shard_graph(nodes: List[Node], edges: List[Edge]) -> nx.DiGraph:
     """Builds a NetworkX DiGraph for the shard."""
