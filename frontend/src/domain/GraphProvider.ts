@@ -4,6 +4,7 @@ import { NodeType } from './types';
 export interface GraphProvider {
     getOverlayGraph(): Promise<OverlayGraph>;
     getShard(shardId: string): Promise<ShardData>;
+    findPath(srcNodeId: string, dstNodeId: string): Promise<NodeLocation[]>;
 }
 
 // Simple seeded random to keep mocks deterministic per shard/run
@@ -143,6 +144,114 @@ export class MockGraphProvider implements GraphProvider {
         await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
 
         return this.getShardDataSync(shardId, x, y);
+    }
+
+    async findPath(srcNodeId: string, dstNodeId: string): Promise<NodeLocation[]> {
+        // Mock Pathfinding:
+        // Since we don't have the full graph in memory (it's sharded), we'll cheat for the mock.
+        // We'll generate a "realistic" looking path that hops through shards.
+        // If src/dst are in loaded shards, great. If not, we pretend.
+
+        // 1. Determine Src/Dst Shards
+        const parseId = (id: string) => {
+            const parts = id.split('-');
+            if (parts.length < 2) return { shard: '0', idx: 0 };
+            return { shard: parts[0], idx: parseInt(parts[1]) };
+        };
+
+        const srcInfo = parseId(srcNodeId);
+        const dstInfo = parseId(dstNodeId);
+
+        // Simple case: Same shard -> Straight line simulation
+        // Complex case: Cross shards -> BFS on Shard Grid (0-8)
+
+        const pathNodes: NodeLocation[] = [];
+
+        // Helper to get a random node in a shard
+        const getShardNode = (shardId: string, nodeId: string): NodeLocation => {
+            // Re-generate that specific node deterministically
+            const id = parseInt(shardId);
+            if (isNaN(id)) return { node_id: nodeId, x: 0, y: 0, shard_id: shardId, type: NodeType.INTERNAL }; // Fallback
+
+            const row = Math.floor(id / 3);
+            const col = id % 3;
+            const x = col * 1000 + 500;
+            const y = row * 1000 + 500;
+
+            // We need to match the logic in getShardDataSync to find the EXACT node position
+            // This is expensive to re-gen whole shard, but for mock it's fine.
+            const data = this.getShardDataSync(shardId, x, y);
+            return data.nodes.find(n => n.node_id === nodeId) ||
+                // If not found (e.g. invalid ID), return center of shard
+                { node_id: nodeId, x, y, shard_id: shardId, type: NodeType.INTERNAL };
+        };
+
+        // BFS on Grid to find sequence of shards
+        const shardPath: string[] = [];
+        let curr = parseInt(srcInfo.shard);
+        const target = parseInt(dstInfo.shard);
+
+        if (isNaN(curr) || isNaN(target)) {
+            // Just return direct line
+            pathNodes.push(getShardNode(srcInfo.shard, srcNodeId));
+            pathNodes.push(getShardNode(dstInfo.shard, dstNodeId));
+            return pathNodes;
+        }
+
+        // Greedy grid walk
+        shardPath.push(curr.toString());
+        while (curr !== target) {
+            const Cr = Math.floor(curr / 3), Cc = curr % 3;
+            const Tr = Math.floor(target / 3), Tc = target % 3;
+
+            if (Cc < Tc) curr += 1;
+            else if (Cc > Tc) curr -= 1;
+            else if (Cr < Tr) curr += 3;
+            else if (Cr > Tr) curr -= 3;
+
+            shardPath.push(curr.toString());
+        }
+
+        // Now generate path nodes through these shards
+        // Start
+        pathNodes.push(getShardNode(shardPath[0], srcNodeId));
+
+        // For each intermediate step, pick entry/exit boundary nodes
+        // (For Mock, we'll just pick 2-3 random nodes in each shard to simulate traversal)
+        const rngPath = new LCG(srcNodeId.length + dstNodeId.length);
+
+        for (let i = 0; i < shardPath.length; i++) {
+            const sId = shardPath[i];
+            // const isLast = i === shardPath.length - 1;
+
+            // If it's the start shard, we already added src. 
+            // We need to add some internal nodes then exit.
+
+            // If it's the end shard, we traverse then hit dst.
+
+            const centerId = parseInt(sId);
+            const r = Math.floor(centerId / 3);
+            const c = centerId % 3;
+            const cx = c * 1000 + 500;
+            const cy = r * 1000 + 500;
+            const sData = this.getShardDataSync(sId, cx, cy);
+
+            // Pick a few random nodes in this shard to walk through
+            const steps = 3 + Math.floor(rngPath.next() * 3);
+            for (let k = 0; k < steps; k++) {
+                const randomNode = sData.nodes[Math.floor(rngPath.next() * sData.nodes.length)];
+
+                // Don't add duplicates of src/dst
+                if (randomNode.node_id !== srcNodeId && randomNode.node_id !== dstNodeId) {
+                    pathNodes.push(randomNode);
+                }
+            }
+        }
+
+        // End
+        pathNodes.push(getShardNode(shardPath[shardPath.length - 1], dstNodeId));
+
+        return pathNodes;
     }
 
     private getShardDataSync(shardId: string, cx: number, cy: number): ShardData {

@@ -1,17 +1,19 @@
 import React, { useState, useRef } from 'react';
 
+export type ShardViewMode = 'ALL' | 'PATH' | 'NONE';
+
 export interface ShardControlItem {
     id: string;
-    visible: boolean;
+    mode: ShardViewMode;
 }
 
 interface ShardManagerProps {
     shards: ShardControlItem[];
     onAddShard: (id: string) => void;
-    onToggleShard: (id: string, visible: boolean) => void;
+    onToggleShard: (id: string, mode: ShardViewMode) => void; // Explicit mode set
     onRemoveShard: (id: string) => void;
     onHighlightShard: (id: string) => void;
-    onToggleAll: (visible: boolean) => void;
+    onToggleAll: (mode: ShardViewMode) => void;
 }
 
 export const ShardManager: React.FC<ShardManagerProps> = ({
@@ -36,8 +38,9 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
             const existing = shards.find(s => s.id === id);
             if (existing) {
                 onHighlightShard(id);
-                if (!existing.visible) {
-                    onToggleShard(id, true);
+                // If hidden or path-only, show full
+                if (existing.mode !== 'ALL') {
+                    onToggleShard(id, 'ALL');
                 }
                 // Scroll to it
                 const el = document.getElementById(`shard-item-${id}`);
@@ -122,13 +125,13 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
             {shards.length > 0 && (
                 <div style={{ padding: '8px 10px', display: 'flex', gap: '10px', borderBottom: '1px solid #333' }}>
                     <button
-                        onClick={() => onToggleAll(true)}
+                        onClick={() => onToggleAll('ALL')}
                         style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
                     >
                         👁️ Show All
                     </button>
                     <button
-                        onClick={() => onToggleAll(false)}
+                        onClick={() => onToggleAll('NONE')}
                         style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
                     >
                         🚫 Hide All
@@ -199,15 +202,18 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                             background: '#333',
                             padding: '6px 8px',
                             borderRadius: '4px',
-                            borderLeft: shard.visible ? '3px solid #00ff88' : '3px solid #666',
-                            opacity: shard.visible ? 1 : 0.6
+                            borderLeft: shard.mode === 'ALL' ? '3px solid #00ff88' : (shard.mode === 'PATH' ? '3px solid #0088cc' : '3px solid #666'),
+                            opacity: shard.mode !== 'NONE' ? 1 : 0.6
                         }}
                     >
                         <span>ID: {shard.id}</span>
                         <div style={{ display: 'flex', gap: '4px' }}>
                             <button
-                                onClick={() => onToggleShard(shard.id, !shard.visible)}
-                                title={shard.visible ? "Hide" : "Show"}
+                                onClick={() => {
+                                    const next = shard.mode === 'ALL' ? 'NONE' : 'ALL';
+                                    onToggleShard(shard.id, next);
+                                }}
+                                title={shard.mode === 'ALL' ? "Hide" : "Show"}
                                 style={{
                                     background: 'transparent',
                                     border: 'none',
@@ -216,7 +222,7 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                                     fontSize: '14px'
                                 }}
                             >
-                                {shard.visible ? '👁️' : '🚫'}
+                                {shard.mode === 'ALL' ? '👁️' : (shard.mode === 'PATH' ? '🛤️' : '🚫')}
                             </button>
                             <button
                                 onClick={() => onRemoveShard(shard.id)}

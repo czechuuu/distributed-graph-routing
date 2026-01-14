@@ -32,4 +32,21 @@ describe('MockGraphProvider', () => {
         expect(Array.isArray(overlay.bridges)).toBe(true);
         expect(Array.isArray(overlay.shortcuts)).toBe(true);
     });
+
+    it('should return a path between two nodes', async () => {
+        const provider = new MockGraphProvider();
+        // Path from Shard 0 to Shard 8 (diagonal)
+        const path = await provider.findPath('0-10', '8-10');
+
+        expect(path).toBeDefined();
+        expect(path.length).toBeGreaterThan(0);
+
+        // Check start and end
+        expect(path[0].node_id).toBe('0-10');
+        expect(path[path.length - 1].node_id).toBe('8-10');
+
+        // Check continuity logic (roughly)
+        // We expect some nodes in minimal cross-shard path
+        expect(path.length).toBeGreaterThan(2);
+    });
 });

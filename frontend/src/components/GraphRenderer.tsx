@@ -8,6 +8,8 @@ interface GraphRendererProps {
     overlayEdges: OverlayGraph; // Contains bridges and shortcuts
     onNodeClick?: (node: NodeLocation | null) => void;
     selectedNodeId?: string | null;
+    pathEdges?: Edge[];
+    pathNodes?: Set<string>;
 }
 
 export interface GraphRendererHandle {
@@ -16,7 +18,9 @@ export interface GraphRendererHandle {
     fitToNodes: (nodes: NodeLocation[]) => void;
 }
 
-export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRendererProps>(({ nodes, intraEdges, overlayEdges, onNodeClick, selectedNodeId }, ref) => {
+export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRendererProps>(({
+    nodes, intraEdges, overlayEdges, onNodeClick, selectedNodeId, pathEdges, pathNodes
+}, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
     const [isDragging, setIsDragging] = useState(false);
@@ -135,6 +139,13 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
             drawEdge(e, '#6A0DAD', 2.5, false); // Purple
         });
 
+        // LAYER 4: Path Edges (Highest Priority, Cyan)
+        if (pathEdges) {
+            pathEdges.forEach(e => {
+                drawEdge(e, '#00FFFF', 3, false);
+            });
+        }
+
         // HIGHLIGHT EDGES PASS (Overdraw)
         if (selectedNodeId) {
             allEdges.forEach(e => {
@@ -153,6 +164,18 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
             const isSelected = node.node_id === selectedNodeId;
             const isNeighbor = neighborIds.has(node.node_id);
             const isBoundary = node.type === NodeType.BOUNDARY;
+            const isPathNode = pathNodes?.has(node.node_id);
+
+            // Path Halo
+            if (isPathNode) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, (isBoundary ? 6 : 3) + 4, 0, 2 * Math.PI);
+                ctx.fillStyle = 'rgba(0, 255, 255, 0.4)';
+                ctx.fill();
+                ctx.restore();
+                ctx.beginPath(); // reset for main node
+            }
 
             let radius = isBoundary ? 6 : 3;
             let fill = isBoundary ? '#FF3333' : '#AA4444';
@@ -187,7 +210,7 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
 
     useEffect(() => {
         draw();
-    }, [nodes, intraEdges, overlayEdges, transform, selectedNodeId]);
+    }, [nodes, intraEdges, overlayEdges, transform, selectedNodeId, pathEdges, pathNodes]);
 
     // Handle Resize
     useEffect(() => {
