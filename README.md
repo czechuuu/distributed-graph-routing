@@ -72,6 +72,7 @@ python3 contractions/main.py \
   --intra_table intra_edges \
   --runner DataflowRunner \
   --region us-central1 \
+  --worker_machine_type e2-standard-2 \
   --setup_file ./setup.py
 ```
 
