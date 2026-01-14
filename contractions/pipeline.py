@@ -81,7 +81,7 @@ class ExtractOverlayEdges(beam.DoFn):
         
         overlay_proto = bigtable_storage_pb2.OverlayGraph()
         
-        # 1. Add Shortcuts (Topology only)
+        # Add Shortcuts (Topology only)
         for s in shortcuts:
             pb_edge = overlay_proto.shortcuts.add()
             pb_edge.from_node_id = s.u
@@ -89,7 +89,7 @@ class ExtractOverlayEdges(beam.DoFn):
             pb_edge.weight = int(s.weight) 
             # Note: Path is NOT added here anymore
             
-        # 2. Add Inter-shard Edges (Bridges)
+        # Add Inter-shard Edges (Bridges)
         for e in inter_shard_edges:
             pb_edge = overlay_proto.bridges.add()
             pb_edge.from_node_id = e.u
@@ -132,11 +132,11 @@ class CreateIntraMutations(beam.DoFn):
         row_key = f"{shard_id}".encode('utf-8')
         direct_row = row.DirectRow(row_key)
         
-        # --- 3. Write Intra-shard Edges (ShardGraph) ---
+        # --- Write Intra-shard Edges (ShardGraph) ---
         shard_proto = bigtable_storage_pb2.ShardGraph()
         
         for u, v, d in G.edges(data=True):
-            # Filtrujemy tylko wewnętrzne krawędzie
+            # Filter internal edges only
             u_node = G.nodes[u]
             v_node = G.nodes[v]
             if u_node.get('shard_id') == shard_id and v_node.get('shard_id') == shard_id:
@@ -245,13 +245,13 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
         # intra: (shard_id, graph)
         results = grouped | beam.ParDo(ProcessShard()).with_outputs('shortcuts', 'intra')
         
-        # 1. Write Shortcut Paths
+        # Write Shortcut Paths
         (results.shortcuts 
          | "CreatePathMutations" >> beam.ParDo(CreatePathMutations())
          | "WritePaths" >> WriteToBT(project, instance, shortcuts_table)
         )
         
-        # 2. Extract, Merge and Write Overlay Graph
+        # Extract, Merge and Write Overlay Graph
         (results.shortcuts
          | "ExtractOverlayEdges" >> beam.ParDo(ExtractOverlayEdges())
          | "MergeOverlayGraphs" >> beam.CombineGlobally(MergeOverlayGraphs())
