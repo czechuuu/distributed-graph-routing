@@ -106,7 +106,7 @@ class GraphFacade:
         
         if row:
             # Load Proto for the whole shard
-            cell = row.cells.get('cf', {}).get(b'shard_graph_proto', [])
+            cell = row.cells.get('cf', {}).get(b'val', [])
             if cell:
                 shard_pb = bigtable_storage_pb2.ShardGraph()
                 shard_pb.ParseFromString(cell[0].value)
