@@ -45,7 +45,17 @@ class ProcessShard(beam.DoFn):
 
         inter_shard_edges = []
         for edge in edge_list:
-            if edge.u in out_boundary or edge.v in in_boundary:
+            u_node = G.nodes.get(edge.u)
+            v_node = G.nodes.get(edge.v)
+            
+            # If a node is not in G it means it's from another shard - then we'll resolve to None here
+            # which is good because then we'll detect None != shard_id and add it to inter_shard_edges
+            shard_u = u_node.get('shard_id') if u_node else None
+            shard_v = v_node.get('shard_id') if v_node else None
+            
+            is_internal = (shard_u == shard_id) and (shard_v == shard_id)
+            
+            if not is_internal:
                 inter_shard_edges.append(edge)
         
         yield beam.pvalue.TaggedOutput('shortcuts', (shard_id, shortcuts, inter_shard_edges))
@@ -150,7 +160,7 @@ class CreateIntraMutations(beam.DoFn):
                  loc.x = data.get('x', 0.0)
                  loc.y = data.get('y', 0.0)
         
-        direct_row.set_cell('cf', 'shard_graph_proto', shard_proto.SerializeToString())
+        direct_row.set_cell('cf', 'val', shard_proto.SerializeToString())
         yield direct_row
 
 class CreateNodeIndexMutation(beam.DoFn):
