@@ -186,12 +186,60 @@ function App() {
     }
   };
 
-  const handleSearch = () => {
+  const handleSearch = async () => {
+    // 1. Check loaded shards first (visible nodes)
     const node = displayNodes.find(n => n.node_id === searchId);
     if (node) {
       setSelectedNode(node);
       graphRef.current?.focusNode(node.node_id);
-    } else {
+      return;
+    }
+
+    // 2. Node not in loaded shards - check if shard can be resolved
+    if (!providerRef.current) {
+      alert('Node not found (must be in a loaded/visible shard)');
+      return;
+    }
+
+    try {
+      const shardId = await providerRef.current.getNodeShard(searchId);
+      if (shardId) {
+        // 3. Check if shard is already loaded but collapsed
+        const existingShard = managedShards.find(s => s.id === shardId);
+        if (existingShard) {
+          // Shard is loaded but collapsed (mode !== 'ALL') - uncollapse it
+          if (existingShard.mode !== 'ALL') {
+            handleToggleShard(shardId, 'ALL');
+          }
+          // Focus on the node from the cache
+          setTimeout(() => {
+            graphRef.current?.focusNode(searchId);
+            const loadedNode = shardCache.get(shardId)?.nodes.find(n => n.node_id === searchId);
+            if (loadedNode) setSelectedNode(loadedNode);
+          }, 100);
+          return;
+        }
+
+        // 4. Shard not loaded - ask user if they want to load it
+        const shouldLoad = window.confirm(
+          `Node ${searchId} belongs to shard ${shardId} which is not loaded.\n\nDo you want to load this shard?`
+        );
+        if (shouldLoad) {
+          const success = await handleAddShard(shardId, 'ALL');
+          if (success) {
+            // Wait for state update, then focus
+            setTimeout(() => {
+              graphRef.current?.focusNode(searchId);
+              // Find and select the node from the newly loaded shard
+              const loadedNode = shardCache.get(shardId)?.nodes.find(n => n.node_id === searchId);
+              if (loadedNode) setSelectedNode(loadedNode);
+            }, 100);
+          }
+        }
+      } else {
+        alert('Node not found in any shard');
+      }
+    } catch (e) {
       alert('Node not found (must be in a loaded/visible shard)');
     }
   };

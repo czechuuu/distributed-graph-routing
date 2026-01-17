@@ -139,4 +139,15 @@ export class RemoteGraphProvider implements GraphProvider {
         }
         return result;
     }
+
+    async getNodeShard(nodeId: string): Promise<string | null> {
+        try {
+            const res = await fetch(`${this.baseUrl}/node-shard/${nodeId}`);
+            if (!res.ok) return null;
+            const data = await res.json();
+            return data.shard_id || null;
+        } catch {
+            return null;
+        }
+    }
 }
