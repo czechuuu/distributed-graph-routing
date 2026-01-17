@@ -7,8 +7,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from google.cloud import bigquery
 
-from serving_layer.graph_facade import GraphFacade
-from serving_layer.engine import find_shortest_path
+from .graph_facade import GraphFacade
+from .engine import find_shortest_path
 
 # --- Configuration ---
 PROJECT_ID = os.getenv("PROJECT_ID", "repetitive-shortest-paths")

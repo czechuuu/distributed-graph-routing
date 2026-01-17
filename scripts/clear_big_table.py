@@ -9,8 +9,13 @@ def clear_table_data(project_id, instance_id, table_id):
     print(f"Attempting to clear all data from table: {table_id}...")
 
     # Drop all rows in the table. An empty row_key_prefix clears everything.
-    for prefix in ["0" , "1", "2", "3", "4", "5", "6", "7", "8", "9"]:
-        table.drop_by_prefix(prefix, timeout=200) # Timeout is optional, adjust as needed
+    # Drop all rows in the table. The keys start with S, P, O, or N.
+    for prefix in ["S", "P", "O", "N"]:
+        try:
+            table.drop_by_prefix(prefix, timeout=200)
+        except Exception:
+            # Table might be empty or prefix not found, continue
+            pass
 
     print(f"All data successfully cleared from table: {table_id}.")
 
@@ -22,12 +27,12 @@ if __name__ == "__main__":
     if first_confirmation.lower() != "y":
         print("Aborting.")
         exit()
-    
+
     in_project_id = input("Enter project ID: ")
     if in_project_id != project_id:
         print("Project IDs do not match. Aborting.")
         exit()
-    
+
     in_instance_id = input("Enter instance ID: ")
     if in_instance_id != instance_id:
         print("Instance IDs do not match. Aborting.")
@@ -37,6 +42,8 @@ if __name__ == "__main__":
     if last_confirmation.lower() != "y":
         print("Aborting.")
         exit()
-    
-    clear_table_data(project_id, instance_id, "intra_edges")
+
+    clear_table_data(project_id, instance_id, "shards")
     clear_table_data(project_id, instance_id, "shortcuts")
+    clear_table_data(project_id, instance_id, "overlay_graph")
+    clear_table_data(project_id, instance_id, "node_index")

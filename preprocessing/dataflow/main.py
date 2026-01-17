@@ -1,7 +1,6 @@
-
 import argparse
 import logging
-from contractions.pipeline import create_pipeline
+from .pipeline import create_pipeline
 
 def run(argv=None):
     parser = argparse.ArgumentParser()
@@ -13,7 +12,8 @@ def run(argv=None):
     parser.add_argument('--shortcuts_table', required=True, help='BigTable table for shortcuts')
     parser.add_argument('--shards_table', required=True, help='BigTable table for shards (intra-shard edges)')
     parser.add_argument('--overlay_table', required=True, help='BigTable table for overlay graph')
-    
+    parser.add_argument('--setup_file', required=True, help='Setup.py path')
+
     known_args, pipeline_args = parser.parse_known_args(argv)
     
     logging.getLogger().setLevel(logging.INFO)
@@ -27,6 +27,7 @@ def run(argv=None):
         shortcuts_table=known_args.shortcuts_table,
         shards_table=known_args.shards_table,
         overlay_table=known_args.overlay_table,
+        setup_file=known_args.setup_file,
         pipeline_args=pipeline_args
     )
 
