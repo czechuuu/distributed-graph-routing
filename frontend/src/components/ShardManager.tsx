@@ -9,7 +9,7 @@ export interface ShardControlItem {
 
 interface ShardManagerProps {
     shards: ShardControlItem[];
-    onAddShard: (id: string) => void;
+    onAddShards: (ids: string[]) => void;
     onToggleShard: (id: string, mode: ShardViewMode) => void; // Explicit mode set
     onRemoveShard: (id: string) => void;
     onHighlightShard: (id: string) => void;
@@ -18,7 +18,7 @@ interface ShardManagerProps {
 
 export const ShardManager: React.FC<ShardManagerProps> = ({
     shards,
-    onAddShard,
+    onAddShards,
     onToggleShard,
     onRemoveShard,
     onHighlightShard,
@@ -33,6 +33,7 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
         if (!rawInput.trim()) return;
 
         const ids = rawInput.split(',').map(s => s.trim()).filter(Boolean);
+        const newIds: string[] = [];
 
         ids.forEach(id => {
             const existing = shards.find(s => s.id === id);
@@ -46,14 +47,18 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                 const el = document.getElementById(`shard-item-${id}`);
                 if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else {
-                onAddShard(id);
+                newIds.push(id);
                 // Scroll to bottom after render - wait for last one
                 setTimeout(() => {
                     const el = document.getElementById(`shard-item-${id}`);
                     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }, 50);
+                }, 100);
             }
         });
+
+        if (newIds.length > 0) {
+            onAddShards(newIds);
+        }
         setInputValue('');
     };
 

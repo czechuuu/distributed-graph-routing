@@ -5,6 +5,7 @@ import { MapContainer, TileLayer } from 'react-leaflet';
 import { GraphRenderer } from './components/GraphRenderer';
 import type { GraphRendererHandle } from './components/GraphRenderer';
 import { MockGraphProvider } from './domain/GraphProvider';
+import { RemoteGraphProvider } from './domain/RemoteGraphProvider';
 import { ShardManager } from './components/ShardManager';
 import { PathControl } from './components/PathControl';
 import type { ShardControlItem, ShardViewMode } from './components/ShardManager';
@@ -32,7 +33,12 @@ function App() {
   // Shard State
   const [managedShards, setManagedShards] = useState<ShardControlItem[]>([]);
   const [shardCache, setShardCache] = useState<Map<string, ShardData>>(new Map());
-  const providerRef = useRef(new MockGraphProvider());
+
+  const providerRef = useRef(
+    import.meta.env.VITE_USE_REMOTE === 'true'
+      ? new RemoteGraphProvider()
+      : new MockGraphProvider()
+  );
 
   // Initial Load
   useEffect(() => {
@@ -92,7 +98,7 @@ function App() {
 
 
 
-  const handleAddShard = async (id: string, initialMode: ShardViewMode = 'ALL') => {
+  const handleAddShard = async (id: string, initialMode: ShardViewMode = 'ALL', options: { silentError?: boolean } = {}) => {
     setManagedShards(prev => [...prev, { id, mode: initialMode }]);
     if (!shardCache.has(id)) {
       try {
@@ -103,20 +109,34 @@ function App() {
           return next;
         });
         if (initialMode !== 'NONE') graphRef.current?.fitToNodes(shardData.nodes);
+        return true;
       } catch (e) {
-        alert('Shard not found: ' + id);
+        if (!options.silentError) alert('Shard not found: ' + id);
         setManagedShards(prev => prev.filter(s => s.id !== id));
+        return false;
       }
     }
+    return true;
   };
   // overload/wrapper for ShardManager compat
-  const handleAddShardUI = (idLine: string) => {
-    const ids = idLine.split(',').map(s => s.trim()).filter(Boolean);
-    ids.forEach(id => {
+  // overload/wrapper for ShardManager compat
+  const handleAddShardsUI = async (ids: string[]) => {
+    const promises = ids.map(id => {
       if (!managedShards.find(s => s.id === id)) {
-        handleAddShard(id);
+        return handleAddShard(id, 'ALL', { silentError: true });
       }
+      return Promise.resolve(true);
     });
+
+    const results = await Promise.all(promises);
+    const missing: string[] = [];
+    results.forEach((success, index) => {
+      if (!success) missing.push(ids[index]);
+    });
+
+    if (missing.length > 0) {
+      alert('Shards not found: ' + missing.join(', '));
+    }
   };
 
   const handleToggleShard = (id: string, mode: ShardViewMode) => {
@@ -251,7 +271,7 @@ function App() {
           <div style={{ position: 'absolute', top: 10, left: 240, zIndex: 1001 }}>
             <ShardManager
               shards={managedShards}
-              onAddShard={handleAddShardUI}
+              onAddShards={handleAddShardsUI}
               onToggleShard={handleToggleShard}
               onRemoveShard={handleRemoveShard}
               onHighlightShard={handleHighlightShard}
