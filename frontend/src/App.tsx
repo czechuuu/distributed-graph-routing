@@ -15,10 +15,13 @@ import { computeContraction } from './domain/pathLogic';
 import { StartupModal } from './components/StartupModal';
 import { type Region } from './domain/MapMetadata';
 import { getS2CellId } from './domain/s2utils';
+import { DEFAULT_SETTINGS, type AppSettings } from './domain/AppSettings';
 import type L from 'leaflet';
+import type { GraphProvider } from './domain/GraphProvider';
 
 function App() {
   const [activeRegion, setActiveRegion] = useState<Region | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
 
   const [overlayGraph, setOverlayGraph] = useState<OverlayGraph>({ bridges: [], shortcuts: [] });
   const [selectedNode, setSelectedNode] = useState<NodeLocation | null>(null);
@@ -37,16 +40,20 @@ function App() {
   const [shardCache, setShardCache] = useState<Map<string, ShardData>>(new Map());
   const [isPointClickMode, setIsPointClickMode] = useState(false);
 
-  const providerRef = useRef(
-    import.meta.env.VITE_USE_REMOTE === 'true'
-      ? new RemoteGraphProvider()
-      : new MockGraphProvider()
-  );
+  const providerRef = useRef<GraphProvider | null>(null);
 
-  // Initial Load
+  // Create provider when settings are set (after region selection)
   useEffect(() => {
+    if (!activeRegion) return; // Don't create provider until region is selected
+
+    if (appSettings.useRemote) {
+      providerRef.current = new RemoteGraphProvider(appSettings.dataDomainUrl);
+    } else {
+      providerRef.current = new MockGraphProvider();
+    }
+
     providerRef.current.getOverlayGraph().then(setOverlayGraph);
-  }, []);
+  }, [activeRegion, appSettings]);
 
   // Compute display data & Contraction Logic
   const { displayNodes, displayEdges, displayOverlayEdges, pathEdges, pathNodesSet } = useMemo(() => {
@@ -102,6 +109,7 @@ function App() {
 
 
   const handleAddShard = async (id: string, initialMode: ShardViewMode = 'ALL', options: { silentError?: boolean } = {}) => {
+    if (!providerRef.current) return false;
     setManagedShards(prev => [...prev, { id, mode: initialMode }]);
     if (!shardCache.has(id)) {
       try {
@@ -189,7 +197,7 @@ function App() {
   };
 
   const handleFindPath = async () => {
-    if (!pathSourceId || !pathTargetId) return;
+    if (!pathSourceId || !pathTargetId || !providerRef.current) return;
     setIsPathLoading(true);
     try {
       const path = await providerRef.current.findPath(pathSourceId, pathTargetId);
@@ -226,7 +234,8 @@ function App() {
     setActivePath(null);
   };
 
-  const handleSelectRegion = (region: Region) => {
+  const handleSelectRegion = (region: Region, settings: AppSettings) => {
+    setAppSettings(settings);
     setActiveRegion(region);
   };
 
@@ -234,8 +243,8 @@ function App() {
   const handleMapClick = (latlng: L.LatLng) => {
     if (!isPointClickMode) return;
 
-    // Calculate S2 cell ID at level 12 (default)
-    const s2CellId = getS2CellId(latlng.lat, latlng.lng);
+    // Calculate S2 cell ID using configured level
+    const s2CellId = getS2CellId(latlng.lat, latlng.lng, appSettings.s2CellLevel);
 
     // Add the shard using existing logic
     handleAddShard(s2CellId, 'ALL');
