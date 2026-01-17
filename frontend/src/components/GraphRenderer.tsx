@@ -106,26 +106,48 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
             }
         };
 
-        // Shortcuts (Purple Dashed)
-        overlayEdges.shortcuts.forEach(e => drawEdge(e, '#651FFF', 1.5, true));
+        // Helper to check if edge connects to selected node
+        const isEdgeConnectedToSelected = (e: Edge): boolean => {
+            return selectedNodeId !== null && selectedNodeId !== undefined &&
+                (e.from_node_id === selectedNodeId || e.to_node_id === selectedNodeId);
+        };
 
-        // Intra-Edges (Dark Grey)
-        intraEdges.forEach(e => drawEdge(e, '#333', 1.2));
+        // Helper to check if bridge connects nodes from different shards
+        const isCrossShardBridge = (e: Edge): boolean => {
+            const fromNode = nodeMap.get(e.from_node_id);
+            const toNode = nodeMap.get(e.to_node_id);
+            if (!fromNode || !toNode) return false;
+            return fromNode.shard_id !== toNode.shard_id;
+        };
 
-        // Bridges (Cyan/Blue)
-        overlayEdges.bridges.forEach(e => drawEdge(e, 'rgba(0, 200, 255, 0.8)', 2.5));
+        // Draw edges connected to selected node (from intra-edges, shortcuts, and bridges)
+        if (selectedNodeId) {
+            // Intra-edges connected to selected node (Dark Grey)
+            intraEdges
+                .filter(isEdgeConnectedToSelected)
+                .forEach(e => drawEdge(e, '#333', 1.2));
+
+            // Shortcuts connected to selected node (Purple Dashed)
+            overlayEdges.shortcuts
+                .filter(isEdgeConnectedToSelected)
+                .forEach(e => drawEdge(e, '#651FFF', 1.5, true));
+
+            // Bridges connected to selected node (Cyan/Blue)
+            overlayEdges.bridges
+                .filter(isEdgeConnectedToSelected)
+                .forEach(e => drawEdge(e, 'rgba(0, 200, 255, 0.8)', 2.5));
+        }
+
+        // Bridges between different shards (Cyan/Blue) - only cross-shard bridges
+        overlayEdges.bridges
+            .filter(e => isCrossShardBridge(e) && !isEdgeConnectedToSelected(e))
+            .forEach(e => drawEdge(e, 'rgba(0, 200, 255, 0.8)', 2.5));
 
         // Path Edges (Bright Yellow/Green)
         if (pathEdges) {
             ctx.shadowBlur = 10;
             ctx.shadowColor = 'rgba(255, 255, 0, 0.8)';
             pathEdges.forEach(e => {
-                // Determine if it's a contraction shortcut (long) or detailed edge
-                // Heuristic: If we don't have intermediate nodes in our list...
-                // Actually, pathEdges passed here are whatever we decided to render.
-
-                // If the edge connects two nodes that are far apart in the node list, etc.
-                // Just draw it thick.
                 drawEdge(e, '#FFEB3B', 4);
             });
             ctx.shadowBlur = 0;
