@@ -12,6 +12,8 @@ interface GraphRendererProps {
     selectedNodeId?: string | null;
     pathEdges?: Edge[];
     pathNodes?: Set<string>;
+    onMapClick?: (latlng: L.LatLng) => void;
+    isPointClickMode?: boolean;
 }
 
 export interface GraphRendererHandle {
@@ -22,7 +24,8 @@ export interface GraphRendererHandle {
 
 // Internal component to handle Map events and Drawing
 export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRendererProps>(({
-    nodes, intraEdges, overlayEdges, onNodeClick, selectedNodeId, pathEdges, pathNodes
+    nodes, intraEdges, overlayEdges, onNodeClick, selectedNodeId, pathEdges, pathNodes,
+    onMapClick, isPointClickMode
 }, ref) => {
     const map = useMap();
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -185,7 +188,7 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
     // Click Handling
     useEffect(() => {
         const canvas = canvasRef.current;
-        if (!canvas || !onNodeClick) return;
+        if (!canvas) return;
 
         const handleClick = (e: MouseEvent) => {
             const rect = canvas.getBoundingClientRect();
@@ -208,14 +211,22 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
                 }
             }
 
-            // Prioritize Boundary nodes if overlaps?
-            // Simple closest is fine for now.
-            onNodeClick(closest);
+            // If a node was found, handle node click
+            if (closest) {
+                onNodeClick?.(closest);
+            } else if (isPointClickMode && onMapClick) {
+                // No node found and in point+click mode: trigger map click
+                const latlng = map.containerPointToLatLng(L.point(clickX, clickY));
+                onMapClick(latlng);
+            } else {
+                // Deselect (click empty space)
+                onNodeClick?.(null);
+            }
         };
 
         canvas.addEventListener('click', handleClick);
         return () => canvas.removeEventListener('click', handleClick);
-    }, [nodes, onNodeClick, map]);
+    }, [nodes, onNodeClick, onMapClick, isPointClickMode, map]);
 
     return (
         <canvas
@@ -225,7 +236,8 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
                 top: 0,
                 left: 0,
                 zIndex: 500, // Above map tiles, below UI controls? Leaflet z-indexes: Pane 400.
-                pointerEvents: 'auto'
+                pointerEvents: 'auto',
+                cursor: isPointClickMode ? 'crosshair' : 'default'
             }}
         />
     );

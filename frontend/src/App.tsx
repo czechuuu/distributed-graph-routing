@@ -14,6 +14,8 @@ import { NodeType } from './domain/types';
 import { computeContraction } from './domain/pathLogic';
 import { StartupModal } from './components/StartupModal';
 import { type Region } from './domain/MapMetadata';
+import { getS2CellId } from './domain/s2utils';
+import type L from 'leaflet';
 
 function App() {
   const [activeRegion, setActiveRegion] = useState<Region | null>(null);
@@ -33,6 +35,7 @@ function App() {
   // Shard State
   const [managedShards, setManagedShards] = useState<ShardControlItem[]>([]);
   const [shardCache, setShardCache] = useState<Map<string, ShardData>>(new Map());
+  const [isPointClickMode, setIsPointClickMode] = useState(false);
 
   const providerRef = useRef(
     import.meta.env.VITE_USE_REMOTE === 'true'
@@ -227,6 +230,20 @@ function App() {
     setActiveRegion(region);
   };
 
+  // Point+Click map handler
+  const handleMapClick = (latlng: L.LatLng) => {
+    if (!isPointClickMode) return;
+
+    // Calculate S2 cell ID at level 12 (default)
+    const s2CellId = getS2CellId(latlng.lat, latlng.lng);
+
+    // Add the shard using existing logic
+    handleAddShard(s2CellId, 'ALL');
+
+    // Exit point+click mode after adding
+    setIsPointClickMode(false);
+  };
+
   if (!activeRegion) {
     return <StartupModal onSelectRegion={handleSelectRegion} />;
   }
@@ -254,6 +271,8 @@ function App() {
           selectedNodeId={selectedNode?.node_id}
           pathEdges={pathEdges}
           pathNodes={pathNodesSet}
+          onMapClick={handleMapClick}
+          isPointClickMode={isPointClickMode}
         />
 
         {/* UI Overlay Controls - We need them ON TOP of the map */}
@@ -276,6 +295,8 @@ function App() {
               onRemoveShard={handleRemoveShard}
               onHighlightShard={handleHighlightShard}
               onToggleAll={handleToggleAll}
+              isPointClickMode={isPointClickMode}
+              onTogglePointClickMode={() => setIsPointClickMode(prev => !prev)}
             />
           </div>
 

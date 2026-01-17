@@ -14,6 +14,8 @@ interface ShardManagerProps {
     onRemoveShard: (id: string) => void;
     onHighlightShard: (id: string) => void;
     onToggleAll: (mode: ShardViewMode) => void;
+    isPointClickMode?: boolean;
+    onTogglePointClickMode?: () => void;
 }
 
 export const ShardManager: React.FC<ShardManagerProps> = ({
@@ -22,7 +24,9 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
     onToggleShard,
     onRemoveShard,
     onHighlightShard,
-    onToggleAll
+    onToggleAll,
+    isPointClickMode,
+    onTogglePointClickMode
 }) => {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [inputValue, setInputValue] = useState('');
@@ -174,6 +178,23 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                 >
                     Add
                 </button>
+                {onTogglePointClickMode && (
+                    <button
+                        onClick={onTogglePointClickMode}
+                        title={isPointClickMode ? "Cancel point+click mode" : "Click on map to add shard"}
+                        style={{
+                            background: isPointClickMode ? '#1e88e5' : '#444',
+                            border: isPointClickMode ? '2px solid #64b5f6' : '1px solid #555',
+                            color: 'white',
+                            padding: '4px 10px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease'
+                        }}
+                    >
+                        📍
+                    </button>
+                )}
             </div>
 
             {/* List */}
