@@ -16,7 +16,7 @@ import { StartupModal } from './components/StartupModal';
 import { type Region } from './domain/MapMetadata';
 import { getS2CellId } from './domain/s2utils';
 import { DEFAULT_SETTINGS, type AppSettings } from './domain/AppSettings';
-import type L from 'leaflet';
+import L from 'leaflet';
 import type { GraphProvider } from './domain/GraphProvider';
 
 function App() {
@@ -34,6 +34,8 @@ function App() {
   const [pathTargetId, setPathTargetId] = useState('');
   const [isStatsCollapsed, setIsStatsCollapsed] = useState(false);
   const graphRef = useRef<GraphRendererHandle>(null);
+  const findNodePanelRef = useRef<HTMLDivElement>(null);
+  const shardManagerPanelRef = useRef<HTMLDivElement>(null);
 
   // Shard State
   const [managedShards, setManagedShards] = useState<ShardControlItem[]>([]);
@@ -41,6 +43,17 @@ function App() {
   const [isPointClickMode, setIsPointClickMode] = useState(false);
 
   const providerRef = useRef<GraphProvider | null>(null);
+
+  // Disable Leaflet event propagation on UI panels so text is selectable
+  useEffect(() => {
+    const panels = [findNodePanelRef.current, shardManagerPanelRef.current];
+    panels.forEach(panel => {
+      if (panel) {
+        L.DomEvent.disableClickPropagation(panel);
+        L.DomEvent.disableScrollPropagation(panel);
+      }
+    });
+  });
 
   // Create provider when settings are set (after region selection)
   useEffect(() => {
@@ -83,8 +96,12 @@ function App() {
         // Add intra-edges that are part of path? Already in activePathEdges.
         // What about intra-edges for context? Maybe not.
       } else {
-        // NONE: Only Boundary Nodes
-        nodes.push(...data.nodes.filter(n => n.type === NodeType.BOUNDARY));
+        // NONE: Boundary Nodes + src/dest nodes (so they stay visible when collapsed)
+        nodes.push(...data.nodes.filter(n =>
+          n.type === NodeType.BOUNDARY ||
+          n.node_id === pathSourceId ||
+          n.node_id === pathTargetId
+        ));
       }
     });
 
@@ -104,7 +121,7 @@ function App() {
       pathEdges: activePathEdges,
       pathNodesSet
     };
-  }, [managedShards, shardCache, overlayGraph, activePath]);
+  }, [managedShards, shardCache, overlayGraph, activePath, pathSourceId, pathTargetId]);
 
 
 
@@ -328,6 +345,8 @@ function App() {
           selectedNodeId={selectedNode?.node_id}
           pathEdges={pathEdges}
           pathNodes={pathNodesSet}
+          pathSourceId={pathSourceId}
+          pathTargetId={pathTargetId}
           onMapClick={handleMapClick}
           isPointClickMode={isPointClickMode}
         />
@@ -344,7 +363,7 @@ function App() {
             isLoading={isPathLoading}
           />
 
-          <div style={{ position: 'absolute', top: 10, left: 240, zIndex: 1001 }}>
+          <div ref={shardManagerPanelRef} style={{ position: 'absolute', top: 10, left: 240, zIndex: 1001 }}>
             <ShardManager
               shards={managedShards}
               onAddShards={handleAddShardsUI}
@@ -375,24 +394,26 @@ function App() {
               🔍
             </button>
           ) : (
-            <div style={{
-              position: 'fixed',
-              top: 10,
-              left: 10,
-              width: '300px',
-              color: 'white',
-              background: 'rgba(30,30,30,0.95)',
-              padding: '12px',
-              borderRadius: '8px',
-              zIndex: 9999,
-              backdropFilter: 'blur(4px)',
-              fontFamily: 'monospace',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-              border: '1px solid #444'
-            }}>
+            <div
+              ref={findNodePanelRef}
+              style={{
+                position: 'fixed',
+                top: 10,
+                left: 10,
+                width: '300px',
+                color: 'white',
+                background: 'rgba(30,30,30,0.95)',
+                padding: '12px',
+                borderRadius: '8px',
+                zIndex: 9999,
+                backdropFilter: 'blur(4px)',
+                fontFamily: 'monospace',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                border: '1px solid #444'
+              }}>
               <div style={{
                 fontWeight: 'bold', fontSize: '1rem', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '4px',
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center'

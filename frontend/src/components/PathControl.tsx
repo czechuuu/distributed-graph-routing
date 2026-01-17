@@ -60,27 +60,57 @@ export const PathControl: React.FC<PathControlProps> = ({
                 >✕</button>
             </div>
 
-            <input
-                type="text"
-                value={sourceId}
-                onChange={e => onSetSource(e.target.value)}
-                placeholder="Source Node ID"
-                style={{
-                    background: '#222', border: '1px solid #555', color: 'white',
-                    padding: '4px 8px', borderRadius: '4px'
-                }}
-            />
+            <div style={{ position: 'relative' }}>
+                <input
+                    type="text"
+                    value={sourceId}
+                    onChange={e => onSetSource(e.target.value)}
+                    placeholder="Source Node ID"
+                    style={{
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        background: '#222', border: '1px solid #555', color: 'white',
+                        padding: '4px 28px 4px 8px', borderRadius: '4px'
+                    }}
+                />
+                {sourceId && (
+                    <button
+                        onClick={() => onSetSource('')}
+                        title="Clear source"
+                        style={{
+                            position: 'absolute', right: '4px', top: '50%', transform: 'translateY(-50%)',
+                            background: 'transparent', border: 'none', color: '#888',
+                            cursor: 'pointer', fontSize: '14px', padding: '2px 4px'
+                        }}
+                    >×</button>
+                )}
+            </div>
 
-            <input
-                type="text"
-                value={targetId}
-                onChange={e => onSetTarget(e.target.value)}
-                placeholder="Dest Node ID"
-                style={{
-                    background: '#222', border: '1px solid #555', color: 'white',
-                    padding: '4px 8px', borderRadius: '4px'
-                }}
-            />
+            <div style={{ position: 'relative' }}>
+                <input
+                    type="text"
+                    value={targetId}
+                    onChange={e => onSetTarget(e.target.value)}
+                    placeholder="Dest Node ID"
+                    style={{
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        background: '#222', border: '1px solid #555', color: 'white',
+                        padding: '4px 28px 4px 8px', borderRadius: '4px'
+                    }}
+                />
+                {targetId && (
+                    <button
+                        onClick={() => onSetTarget('')}
+                        title="Clear destination"
+                        style={{
+                            position: 'absolute', right: '4px', top: '50%', transform: 'translateY(-50%)',
+                            background: 'transparent', border: 'none', color: '#888',
+                            cursor: 'pointer', fontSize: '14px', padding: '2px 4px'
+                        }}
+                    >×</button>
+                )}
+            </div>
 
             <div style={{ display: 'flex', gap: '4px' }}>
                 <button

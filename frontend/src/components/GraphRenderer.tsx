@@ -12,6 +12,8 @@ interface GraphRendererProps {
     selectedNodeId?: string | null;
     pathEdges?: Edge[];
     pathNodes?: Set<string>;
+    pathSourceId?: string | null;
+    pathTargetId?: string | null;
     onMapClick?: (latlng: L.LatLng) => void;
     isPointClickMode?: boolean;
 }
@@ -25,7 +27,7 @@ export interface GraphRendererHandle {
 // Internal component to handle Map events and Drawing
 export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRendererProps>(({
     nodes, intraEdges, overlayEdges, onNodeClick, selectedNodeId, pathEdges, pathNodes,
-    onMapClick, isPointClickMode
+    pathSourceId, pathTargetId, onMapClick, isPointClickMode
 }, ref) => {
     const map = useMap();
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -160,6 +162,8 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
 
             const isSelected = selectedNodeId === n.node_id;
             const isPathNode = pathNodes?.has(n.node_id);
+            const isSource = pathSourceId === n.node_id;
+            const isTarget = pathTargetId === n.node_id;
 
             let radius = 4;
             let color = '#2979FF'; // Vibrant Blue
@@ -175,6 +179,22 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
                 if (n.type === NodeType.BOUNDARY) radius = 8;
             }
 
+            // Source node: Blue with glow
+            if (isSource) {
+                color = '#2196F3'; // Blue
+                radius = 10;
+                ctx.shadowBlur = 12;
+                ctx.shadowColor = '#2196F3';
+            }
+
+            // Target node: Green with glow
+            if (isTarget) {
+                color = '#4CAF50'; // Green
+                radius = 10;
+                ctx.shadowBlur = 12;
+                ctx.shadowColor = '#4CAF50';
+            }
+
             if (isSelected) {
                 color = '#fff';
                 radius = 8;
@@ -186,6 +206,14 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
             ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
             ctx.fillStyle = color;
             ctx.fill();
+
+            // Add border ring for source/target
+            if (isSource || isTarget) {
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+            }
 
             if (isSelected) {
                 ctx.shadowBlur = 0;

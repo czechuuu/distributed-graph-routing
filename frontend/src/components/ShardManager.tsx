@@ -99,7 +99,7 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
             position: 'fixed',
             bottom: 20,
             left: 20,
-            width: '280px',
+            width: '300px',
             maxHeight: '400px',
             background: 'rgba(30,30,30,0.95)',
             border: '1px solid #444',
@@ -132,18 +132,28 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
 
             {/* Global Controls */}
             {shards.length > 0 && (
-                <div style={{ padding: '8px 10px', display: 'flex', gap: '10px', borderBottom: '1px solid #333' }}>
+                <div style={{ padding: '8px 10px', display: 'flex', gap: '6px', borderBottom: '1px solid #333' }}>
                     <button
                         onClick={() => onToggleAll('ALL')}
                         style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
                     >
-                        👁️ Show All
+                        👁️ Show
                     </button>
                     <button
                         onClick={() => onToggleAll('NONE')}
                         style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
                     >
-                        🚫 Hide All
+                        🚫 Hide
+                    </button>
+                    <button
+                        onClick={() => {
+                            const ids = shards.map(s => s.id).join(',');
+                            navigator.clipboard.writeText(ids);
+                        }}
+                        title="Copy all shard IDs to clipboard"
+                        style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
+                    >
+                        📋 Copy
                     </button>
                 </div>
             )}
