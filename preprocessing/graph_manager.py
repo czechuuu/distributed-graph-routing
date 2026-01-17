@@ -85,7 +85,7 @@ def handle_file_upload(bucket, file_name):
 
             -- Calculate the ShardId
             UPDATE `{table_id}`
-            SET ShardId = S2_CELLIDFROMPOINT(ST_GEOGPOINT(x, y), 15)
+            SET ShardId = S2_CELLIDFROMPOINT(ST_GEOGPOINT(x, y), 12)
             WHERE TRUE;
         """
         print(f"Running ShardId update query for {table_id}...")
