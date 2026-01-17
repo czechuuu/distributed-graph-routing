@@ -9,8 +9,7 @@ This is a FastAPI service that wraps Google Cloud Bigtable access for the fronte
 ## Installation
 
 ```bash
-cd distributed_graph_routing # Root of the repo (where setup.py is)
-pip install -r distributed_graph_routing/data_domain/requirements.txt
+pip install -r data_domain/requirements.txt
 ```
 
 ## Running the Server
@@ -25,7 +24,7 @@ pip install -r distributed_graph_routing/data_domain/requirements.txt
 
 2. Run the server (from the root directory):
    ```bash
-   uvicorn distributed_graph_routing.data_domain.main:app --reload --port 8000
+   uvicorn data_domain.main:app --reload --port 8000
    ```
 
 ## API

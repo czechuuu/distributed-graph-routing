@@ -1,9 +1,9 @@
 import os
 from google.cloud import bigtable
 from google.cloud.bigtable import row_filters
-import distributed_graph_routing.data_domain.storage_types.bigtable_storage_pb2 as pb
+import data_domain.storage_types.bigtable_storage_pb2 as pb
 # If running as a module, imports might need adjustment. 
-# We assume this is run as 'python -m distributed_graph_routing.data_domain.main'
+# We assume this is run as 'python -m data_domain.main'
 
 class BigtableClient:
     def __init__(self, project_id=None, instance_id=None):
