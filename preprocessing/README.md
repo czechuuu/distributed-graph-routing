@@ -29,18 +29,6 @@ The **Preprocessing** subsystem is responsible for ingesting raw graph data (CSV
         *   `shortcuts`: Precomputed shortcut paths for optimized routing.
         *   `overlay`: High-level graph connecting boundary nodes.
 
-## Directory Structure
-
-*   `main.py`: Entry point for the Cloud Function (`process_graph_upload`).
-*   `graph_manager.py`: Core logic for BigQuery loading and pipeline triggering.
-*   `dataflow/`: Contains the Apache Beam pipeline logic.
-    *   `pipeline.py`: Pipeline definition.
-    *   `algo.py`: Core graph algorithms (Dijkstra, graph building).
-    *   `io_wrappers.py`: Beam IO transforms for BQ and BigTable.
-*   `deploy.sh`: Deployment script for the Cloud Function.
-*   `setup.py`: Package configuration for Dataflow workers.
-*   `requirements.txt`: Dependencies for the environment.
-
 ## Deployment
 
 We use a helper script to deploy the Cloud Function with the correct configuration.

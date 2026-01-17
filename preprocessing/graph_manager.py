@@ -16,7 +16,8 @@ STAGING_LOCATION = "gs://repetitive_shortest_paths_contractions_dataflow/staging
 INSTANCE_ID = "routing-instance"
 SHORTCUTS_TABLE = "shortcuts"
 SHARDS_TABLE = "shards"
-OVERLAY_TABLE = "overlay"
+OVERLAY_TABLE = "overlay_graph"
+NODE_INDEX_TABLE = "node_index"
 REGION = "us-central1"
 
 def handle_file_upload(bucket, file_name):
@@ -160,6 +161,7 @@ def trigger_pipeline():
         shortcuts_table=SHORTCUTS_TABLE,
         shards_table=SHARDS_TABLE,
         overlay_table=OVERLAY_TABLE,
+        node_index_table=NODE_INDEX_TABLE,
         setup_file=setup_file_path,
         pipeline_args=pipeline_args
     )

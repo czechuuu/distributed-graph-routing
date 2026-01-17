@@ -8,6 +8,7 @@ from .algo import build_shard_graph, identify_boundary_nodes, compute_shortcuts
 
 from enum import Enum
 
+from storage_types import bigtable_storage_pb2
         
 class EmitShardsForEdge(beam.DoFn):
     """
@@ -56,7 +57,6 @@ class MutationType(Enum):
 
 class CreatePathMutations(beam.DoFn):
     def process(self, element):
-        from storage_types import bigtable_storage_pb2
         shard_id, shortcuts, inter_shard_edges = element
         
         # Iterate over shortcuts and save paths
@@ -72,7 +72,6 @@ class CreatePathMutations(beam.DoFn):
 
 class ExtractOverlayEdges(beam.DoFn):
     def process(self, element):
-        from storage_types import bigtable_storage_pb2
         shard_id, shortcuts, inter_shard_edges = element
         
         overlay_proto = bigtable_storage_pb2.OverlayGraph()
@@ -91,41 +90,41 @@ class ExtractOverlayEdges(beam.DoFn):
             pb_edge.to_node_id = e.v
             pb_edge.weight = int(e.weight)
             
-        yield overlay_proto
+        yield overlay_proto.SerializeToString()
 
 class MergeOverlayGraphs(beam.CombineFn):
     def create_accumulator(self):
-        from storage_types import bigtable_storage_pb2
-        return bigtable_storage_pb2.OverlayGraph()
+        return []
 
-    def add_input(self, accumulator, element):
-        accumulator.shortcuts.extend(element.shortcuts)
-        accumulator.bridges.extend(element.bridges)
+    def add_input(self, accumulator, element_bytes):
+        accumulator.append(element_bytes)
         return accumulator
 
     def merge_accumulators(self, accumulators):
-        from storage_types import bigtable_storage_pb2
-        merged = bigtable_storage_pb2.OverlayGraph()
+        merged = []
         for acc in accumulators:
-            merged.shortcuts.extend(acc.shortcuts)
-            merged.bridges.extend(acc.bridges)
+            merged.extend(acc)
         return merged
 
     def extract_output(self, accumulator):
-        return accumulator
+        merged_proto = bigtable_storage_pb2.OverlayGraph()
+        for b in accumulator:
+            partial = bigtable_storage_pb2.OverlayGraph()
+            partial.ParseFromString(b)
+            merged_proto.shortcuts.extend(partial.shortcuts)
+            merged_proto.bridges.extend(partial.bridges)
+        return merged_proto.SerializeToString()
 
 class CreateOverlayMutation(beam.DoFn):
-    def process(self, element):
-        # element is the merged OverlayGraph
+    def process(self, element_bytes):
         row_key = b"O#"
         direct_row = row.DirectRow(row_key)
-        direct_row.set_cell('cf', 'val', element.SerializeToString())
+        direct_row.set_cell('cf', 'val', element_bytes)
         yield direct_row
 
 
 class CreateIntraMutations(beam.DoFn):
     def process(self, element):
-        from storage_types import bigtable_storage_pb2
         shard_id, G = element
         row_key = f"S#{shard_id}".encode('utf-8')
         direct_row = row.DirectRow(row_key)
@@ -154,7 +153,19 @@ class CreateIntraMutations(beam.DoFn):
         direct_row.set_cell('cf', 'shard_graph_proto', shard_proto.SerializeToString())
         yield direct_row
 
-def create_pipeline(project, temp_location, input_nodes, input_edges, instance, shortcuts_table, shards_table, overlay_table, setup_file, pipeline_args=None):
+class CreateNodeIndexMutation(beam.DoFn):
+    def process(self, element):
+        # element is a Node object
+        row_key = f"N#{element.id}".encode('utf-8')
+        direct_row = row.DirectRow(row_key)
+        
+        lookup_proto = bigtable_storage_pb2.ShardLookup()
+        lookup_proto.shard_id = element.shard_id
+        
+        direct_row.set_cell('cf', 'val', lookup_proto.SerializeToString())
+        yield direct_row
+
+def create_pipeline(project, temp_location, input_nodes, input_edges, instance, shortcuts_table, shards_table, overlay_table, node_index_table, setup_file, pipeline_args=None):
     if pipeline_args is None:
         pipeline_args = []
 
@@ -169,7 +180,7 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
 
     # Initialize PipelineOptions with passed args (e.g. --runner, --region) using flags argument.
     options = PipelineOptions(flags=pipeline_args)
-    options.view_as(SetupOptions).save_main_session = False
+    options.view_as(SetupOptions).save_main_session = True
     
     google_cloud_options = options.view_as(beam.options.pipeline_options.GoogleCloudOptions) 
     google_cloud_options.project = project
@@ -263,8 +274,13 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
          | "WriteOverlay" >> WriteToBT(project, instance, overlay_table)
         )
         
-        # Write Intra-shard edges
         (results.intra 
          | "CreateIntraMutations" >> beam.ParDo(CreateIntraMutations())
          | "WriteIntra" >> WriteToBT(project, instance, shards_table)
+        )
+        
+        # Write Node Index
+        (nodes
+         | "CreateNodeIndexMutation" >> beam.ParDo(CreateNodeIndexMutation())
+         | "WriteNodeIndex" >> WriteToBT(project, instance, node_index_table)
         )
