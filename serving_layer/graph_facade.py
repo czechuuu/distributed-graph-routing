@@ -10,21 +10,25 @@ except ImportError:
     bigtable = None
     row_filters = None
     logger.warning("google-cloud-bigtable not installed. Only mock mode will work.")
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional, OrderedDict as OrderedDictType
+from collections import OrderedDict
 
 from serving_layer import bigtable_storage_pb2
 
 class GraphFacade:
-    def __init__(self, project_id: str, instance_id: str, overlay_table_id: str, intra_table_id: str, use_mock: bool = False):
+    def __init__(self, project_id: str, instance_id: str, overlay_table_id: str, intra_table_id: str, shortcuts_table_id: str, use_mock: bool = False, max_cache_size: int = 10000):
         self.use_mock = use_mock
+        self.max_cache_size = max_cache_size
         self.overlay = nx.DiGraph()
-        self.shortcut_expansions: Dict[Tuple[int, int], List[int]] = {}
+        self.shortcut_expansions: OrderedDictType[Tuple[int, int], List[int]] = OrderedDict()
+        self.known_shortcuts: set[Tuple[int, int]] = set()
         
         if not self.use_mock:
             self.client = bigtable.Client(project=project_id, admin=True)
             self.instance = self.client.instance(instance_id)
             self.overlay_table = self.instance.table(overlay_table_id)
             self.intra_table = self.instance.table(intra_table_id)
+            self.shortcuts_table = self.instance.table(shortcuts_table_id)
             
             self._load_overlay_graph()
         else:
@@ -48,16 +52,13 @@ class GraphFacade:
                         u, v, w = edge.from_node_id, edge.to_node_id, edge.weight
                         self.overlay.add_edge(u, v, weight=w)
                         
-                        # Store expansion path directly from Proto
-                        if edge.path:
-                            path_list = list(edge.path)
-                            self.shortcut_expansions[(u, v)] = path_list
+                        # Register as known shortcut (lazy load path later)
+                        self.known_shortcuts.add((u, v))
                             
                         # Handle Bidirectionality
                         if edge.bidirectional:
                             self.overlay.add_edge(v, u, weight=w)
-                            if edge.path:
-                                self.shortcut_expansions[(v, u)] = list(edge.path)[::-1]
+                            self.known_shortcuts.add((v, u))
 
                 # Parse Bridges (Inter-shard edges)
                 cell_bridges = row.cells.get('cf', {}).get(b'inter_edges_proto', [])
@@ -71,6 +72,53 @@ class GraphFacade:
             
         except Exception as e:
             logger.error(f"Error loading Overlay: {e}")
+
+    def get_expansion(self, u: int, v: int) -> Optional[List[int]]:
+        """
+        Lazily loads the shortcut expansion path for edge u->v.
+        """
+        # 1. Check if it is a known shortcut
+        if (u, v) not in self.known_shortcuts:
+            return None
+
+        # 2. Check in-memory cache
+        if (u, v) in self.shortcut_expansions:
+            # LRU: Move to end (most recently used)
+            self.shortcut_expansions.move_to_end((u, v))
+            return self.shortcut_expansions[(u, v)]
+
+        # 3. Fetch from Bigtable
+        if self.use_mock or getattr(self, 'shortcuts_table', None) is None:
+            # In mock mode or if table not initialized, rely only on cache (checked above)
+            if self.use_mock:
+                logger.warning(f"Mock mode: Shortcut expansion for {u}->{v} not found in cache.")
+            return None
+
+        try:
+            row_key = f"P#{u}#{v}".encode('utf-8')
+            row = self.shortcuts_table.read_row(row_key)
+            gsutil ls
+            if row:
+                cell = row.cells.get('cf', {}).get(b'val', [])
+                if cell:
+                    path_proto = bigtable_storage_pb2.ShortcutPath()
+                    path_proto.ParseFromString(cell[0].value)
+                    
+                    path_list = list(path_proto.nodes)
+                    self.shortcut_expansions[(u, v)] = path_list
+                    
+                    # LRU: Check size and evict if necessary
+                    if len(self.shortcut_expansions) > self.max_cache_size:
+                        self.shortcut_expansions.popitem(last=False) # Remove FIFO (oldest)
+                    
+                    return path_list
+            
+            logger.warning(f"Shortcut path for {u}->{v} not found in Bigtable.")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error fetching shortcut expansion {u}->{v}: {e}")
+            return None
 
     def get_query_graph(self, start_node: int, end_node: int, node_to_shard: Dict[int, int]) -> nx.DiGraph:
         """

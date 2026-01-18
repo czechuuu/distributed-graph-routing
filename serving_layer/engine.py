@@ -52,10 +52,10 @@ def unpack_path(path_nodes: List[int], facade: GraphFacade) -> List[int]:
         v = path_nodes[i+1]
         
         # Check if (u, v) is a shortcut known to the facade
-        if (u, v) in facade.shortcut_expansions:
+        expansion = facade.get_expansion(u, v)
+        if expansion:
             logger.debug(f"Unpacking shortcut {u}->{v}...")
             # Expansion path includes u and v: [u, x, y, z, v]
-            expansion = facade.shortcut_expansions[(u, v)]
             
             # We already added 'u' (it was the last element derived or the start)
             # So we append everything FROM index 1
