@@ -10,10 +10,10 @@ except ImportError:
     bigtable = None
     logger.warning("google-cloud-bigtable not installed.")
 
-from serving_layer import bigtable_storage_pb2
+from serving_layer.storage_types import bigtable_storage_pb2
 
 class GraphFacade:
-    def __init__(self, project_id: str, instance_id: str, overlay_table_id: str, intra_table_id: str, use_mock: bool = False):
+    def __init__(self, project_id: str, instance_id: str, overlay_table_id: str, shortcuts_table_id: str, intra_table_id: str, use_mock: bool = False):
         self.use_mock = use_mock
         self.overlay = nx.DiGraph()
         # Cache for expansions of shortcuts (to avoid asking Bigtable for the same thing repeatedly)
@@ -24,6 +24,7 @@ class GraphFacade:
                 self.client = bigtable.Client(project=project_id, admin=True)
                 self.instance = self.client.instance(instance_id)
                 self.overlay_table = self.instance.table(overlay_table_id)
+                self.shortcuts_table = self.instance.table(shortcuts_table_id)
                 self.intra_table = self.instance.table(intra_table_id)
                 self._load_overlay_graph()
             except Exception as e:
@@ -83,7 +84,7 @@ class GraphFacade:
     def _merge_shard_into_graph(self, graph: nx.DiGraph, shard_id: int):
         if self.use_mock: return
         try:
-            row_key = f"{shard_id}".encode('utf-8')
+            row_key = f"S#{shard_id}".encode('utf-8')
             row = self.intra_table.read_row(row_key)
             
             if row:
@@ -92,6 +93,12 @@ class GraphFacade:
                     shard_pb = bigtable_storage_pb2.ShardGraph()
                     shard_pb.ParseFromString(cell[0].value)
                     
+                    logger.info(f"Shard Content: {len(shard_pb.edges)} edges, {len(shard_pb.locations)} locations")
+                    
+                    # Add nodes explicitly (important for source/target nodes)
+                    for loc in shard_pb.locations:
+                         graph.add_node(loc.node_id)
+
                     for edge in shard_pb.edges:
                         graph.add_edge(edge.from_node_id, edge.to_node_id, weight=edge.weight)
         except Exception as e:
@@ -112,7 +119,7 @@ class GraphFacade:
 
         try:
             row_key = f"P#{u}#{v}".encode('utf-8')
-            row = self.overlay_table.read_row(row_key) # Shortcuts table
+            row = self.shortcuts_table.read_row(row_key) # Shortcuts table
             
             if row:
                 cell = row.cells.get('cf', {}).get(b'val', [])

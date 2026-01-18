@@ -23,7 +23,7 @@ def find_shortest_path(facade: GraphFacade, start_node: int, end_node: int, node
     # Pathfinding
     try:
         path = nx.bidirectional_dijkstra(graph, start_node, end_node, weight='weight')[1]
-        path = nx.bidirectional_dijkstra(graph, start_node, end_node, weight='weight')[1]
+
         logger.debug(f"Raw Path found: {path}")
     except nx.NetworkXNoPath:
         logger.info("No path found.")
