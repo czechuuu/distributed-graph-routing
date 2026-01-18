@@ -18,6 +18,7 @@ class GraphFacade:
         self.overlay = nx.DiGraph()
         # Cache for expansions of shortcuts (to avoid asking Bigtable for the same thing repeatedly)
         self.shortcut_cache: Dict[Tuple[int, int], List[int]] = {}
+        self.node_coord_cache: Dict[int, Tuple[float, float]] = {}
         
         if not self.use_mock:
             try:
@@ -97,7 +98,8 @@ class GraphFacade:
                     
                     # Add nodes explicitly (important for source/target nodes)
                     for loc in shard_pb.locations:
-                         graph.add_node(loc.node_id)
+                         self.node_coord_cache[loc.node_id] = (loc.x, loc.y)
+                         graph.add_node(loc.node_id, x=loc.x, y=loc.y)
 
                     for edge in shard_pb.edges:
                         graph.add_edge(edge.from_node_id, edge.to_node_id, weight=edge.weight)
@@ -133,5 +135,9 @@ class GraphFacade:
                     return path
         except Exception as e:
             logger.warning(f"Failed to fetch expansion for {u}->{v}: {e}")
+            
+    def get_node_coords(self, node_id: int) -> Tuple[float, float]:
+        """Returns (lat, lng) for a node if found in cache."""
+        return self.node_coord_cache.get(node_id)
             
         return []
