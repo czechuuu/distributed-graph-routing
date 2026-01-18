@@ -9,20 +9,24 @@ export interface ShardControlItem {
 
 interface ShardManagerProps {
     shards: ShardControlItem[];
-    onAddShard: (id: string) => void;
+    onAddShards: (ids: string[]) => void;
     onToggleShard: (id: string, mode: ShardViewMode) => void; // Explicit mode set
     onRemoveShard: (id: string) => void;
     onHighlightShard: (id: string) => void;
     onToggleAll: (mode: ShardViewMode) => void;
+    isPointClickMode?: boolean;
+    onTogglePointClickMode?: () => void;
 }
 
 export const ShardManager: React.FC<ShardManagerProps> = ({
     shards,
-    onAddShard,
+    onAddShards,
     onToggleShard,
     onRemoveShard,
     onHighlightShard,
-    onToggleAll
+    onToggleAll,
+    isPointClickMode,
+    onTogglePointClickMode
 }) => {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [inputValue, setInputValue] = useState('');
@@ -33,6 +37,7 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
         if (!rawInput.trim()) return;
 
         const ids = rawInput.split(',').map(s => s.trim()).filter(Boolean);
+        const newIds: string[] = [];
 
         ids.forEach(id => {
             const existing = shards.find(s => s.id === id);
@@ -46,14 +51,18 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                 const el = document.getElementById(`shard-item-${id}`);
                 if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else {
-                onAddShard(id);
+                newIds.push(id);
                 // Scroll to bottom after render - wait for last one
                 setTimeout(() => {
                     const el = document.getElementById(`shard-item-${id}`);
                     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }, 50);
+                }, 100);
             }
         });
+
+        if (newIds.length > 0) {
+            onAddShards(newIds);
+        }
         setInputValue('');
     };
 
@@ -90,7 +99,7 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
             position: 'fixed',
             bottom: 20,
             left: 20,
-            width: '280px',
+            width: '300px',
             maxHeight: '400px',
             background: 'rgba(30,30,30,0.95)',
             border: '1px solid #444',
@@ -123,18 +132,28 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
 
             {/* Global Controls */}
             {shards.length > 0 && (
-                <div style={{ padding: '8px 10px', display: 'flex', gap: '10px', borderBottom: '1px solid #333' }}>
+                <div style={{ padding: '8px 10px', display: 'flex', gap: '6px', borderBottom: '1px solid #333' }}>
                     <button
                         onClick={() => onToggleAll('ALL')}
                         style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
                     >
-                        👁️ Show All
+                        👁️ Show
                     </button>
                     <button
                         onClick={() => onToggleAll('NONE')}
                         style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
                     >
-                        🚫 Hide All
+                        🚫 Hide
+                    </button>
+                    <button
+                        onClick={() => {
+                            const ids = shards.map(s => s.id).join(',');
+                            navigator.clipboard.writeText(ids);
+                        }}
+                        title="Copy all shard IDs to clipboard"
+                        style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
+                    >
+                        📋 Copy
                     </button>
                 </div>
             )}
@@ -169,6 +188,23 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                 >
                     Add
                 </button>
+                {onTogglePointClickMode && (
+                    <button
+                        onClick={onTogglePointClickMode}
+                        title={isPointClickMode ? "Cancel point+click mode" : "Click on map to add shard"}
+                        style={{
+                            background: isPointClickMode ? '#1e88e5' : '#444',
+                            border: isPointClickMode ? '2px solid #64b5f6' : '1px solid #555',
+                            color: 'white',
+                            padding: '4px 10px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease'
+                        }}
+                    >
+                        📍
+                    </button>
+                )}
             </div>
 
             {/* List */}

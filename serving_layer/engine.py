@@ -1,7 +1,7 @@
 import logging
 import networkx as nx
 from typing import List, Dict
-from serving_layer.graph_facade import GraphFacade
+from .graph_facade import GraphFacade
 
 logger = logging.getLogger("RoutingEngine")
 

@@ -13,7 +13,7 @@ except ImportError:
 from typing import Dict, List, Tuple, Optional, OrderedDict as OrderedDictType
 from collections import OrderedDict
 
-from serving_layer import bigtable_storage_pb2
+from .storage_types import bigtable_storage_pb2
 
 class GraphFacade:
     def __init__(self, project_id: str, instance_id: str, overlay_table_id: str, intra_table_id: str, shortcuts_table_id: str, use_mock: bool = False, max_cache_size: int = 10000):
@@ -154,7 +154,7 @@ class GraphFacade:
         
         if row:
             # Load Proto for the whole shard
-            cell = row.cells.get('cf', {}).get(b'shard_graph_proto', [])
+            cell = row.cells.get('cf', {}).get(b'val', [])
             if cell:
                 shard_pb = bigtable_storage_pb2.ShardGraph()
                 shard_pb.ParseFromString(cell[0].value)

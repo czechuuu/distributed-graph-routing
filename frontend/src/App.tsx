@@ -5,6 +5,7 @@ import { MapContainer, TileLayer } from 'react-leaflet';
 import { GraphRenderer } from './components/GraphRenderer';
 import type { GraphRendererHandle } from './components/GraphRenderer';
 import { MockGraphProvider } from './domain/GraphProvider';
+import { RemoteGraphProvider } from './domain/RemoteGraphProvider';
 import { ShardManager } from './components/ShardManager';
 import { PathControl } from './components/PathControl';
 import type { ShardControlItem, ShardViewMode } from './components/ShardManager';
@@ -13,9 +14,14 @@ import { NodeType } from './domain/types';
 import { computeContraction } from './domain/pathLogic';
 import { StartupModal } from './components/StartupModal';
 import { type Region } from './domain/MapMetadata';
+import { getS2CellId } from './domain/s2utils';
+import { DEFAULT_SETTINGS, type AppSettings } from './domain/AppSettings';
+import L from 'leaflet';
+import type { GraphProvider } from './domain/GraphProvider';
 
 function App() {
   const [activeRegion, setActiveRegion] = useState<Region | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
 
   const [overlayGraph, setOverlayGraph] = useState<OverlayGraph>({ bridges: [], shortcuts: [] });
   const [selectedNode, setSelectedNode] = useState<NodeLocation | null>(null);
@@ -28,16 +34,39 @@ function App() {
   const [pathTargetId, setPathTargetId] = useState('');
   const [isStatsCollapsed, setIsStatsCollapsed] = useState(false);
   const graphRef = useRef<GraphRendererHandle>(null);
+  const findNodePanelRef = useRef<HTMLDivElement>(null);
+  const shardManagerPanelRef = useRef<HTMLDivElement>(null);
 
   // Shard State
   const [managedShards, setManagedShards] = useState<ShardControlItem[]>([]);
   const [shardCache, setShardCache] = useState<Map<string, ShardData>>(new Map());
-  const providerRef = useRef(new MockGraphProvider());
+  const [isPointClickMode, setIsPointClickMode] = useState(false);
 
-  // Initial Load
+  const providerRef = useRef<GraphProvider | null>(null);
+
+  // Disable Leaflet event propagation on UI panels so text is selectable
   useEffect(() => {
+    const panels = [findNodePanelRef.current, shardManagerPanelRef.current];
+    panels.forEach(panel => {
+      if (panel) {
+        L.DomEvent.disableClickPropagation(panel);
+        L.DomEvent.disableScrollPropagation(panel);
+      }
+    });
+  });
+
+  // Create provider when settings are set (after region selection)
+  useEffect(() => {
+    if (!activeRegion) return; // Don't create provider until region is selected
+
+    if (appSettings.useRemote) {
+      providerRef.current = new RemoteGraphProvider(appSettings.dataDomainUrl);
+    } else {
+      providerRef.current = new MockGraphProvider();
+    }
+
     providerRef.current.getOverlayGraph().then(setOverlayGraph);
-  }, []);
+  }, [activeRegion, appSettings]);
 
   // Compute display data & Contraction Logic
   const { displayNodes, displayEdges, displayOverlayEdges, pathEdges, pathNodesSet } = useMemo(() => {
@@ -67,8 +96,12 @@ function App() {
         // Add intra-edges that are part of path? Already in activePathEdges.
         // What about intra-edges for context? Maybe not.
       } else {
-        // NONE: Only Boundary Nodes
-        nodes.push(...data.nodes.filter(n => n.type === NodeType.BOUNDARY));
+        // NONE: Boundary Nodes + src/dest nodes (so they stay visible when collapsed)
+        nodes.push(...data.nodes.filter(n =>
+          n.type === NodeType.BOUNDARY ||
+          n.node_id === pathSourceId ||
+          n.node_id === pathTargetId
+        ));
       }
     });
 
@@ -88,11 +121,12 @@ function App() {
       pathEdges: activePathEdges,
       pathNodesSet
     };
-  }, [managedShards, shardCache, overlayGraph, activePath]);
+  }, [managedShards, shardCache, overlayGraph, activePath, pathSourceId, pathTargetId]);
 
 
 
-  const handleAddShard = async (id: string, initialMode: ShardViewMode = 'ALL') => {
+  const handleAddShard = async (id: string, initialMode: ShardViewMode = 'ALL', options: { silentError?: boolean } = {}) => {
+    if (!providerRef.current) return false;
     setManagedShards(prev => [...prev, { id, mode: initialMode }]);
     if (!shardCache.has(id)) {
       try {
@@ -103,20 +137,34 @@ function App() {
           return next;
         });
         if (initialMode !== 'NONE') graphRef.current?.fitToNodes(shardData.nodes);
+        return true;
       } catch (e) {
-        alert('Shard not found: ' + id);
+        if (!options.silentError) alert('Shard not found: ' + id);
         setManagedShards(prev => prev.filter(s => s.id !== id));
+        return false;
       }
     }
+    return true;
   };
   // overload/wrapper for ShardManager compat
-  const handleAddShardUI = (idLine: string) => {
-    const ids = idLine.split(',').map(s => s.trim()).filter(Boolean);
-    ids.forEach(id => {
+  // overload/wrapper for ShardManager compat
+  const handleAddShardsUI = async (ids: string[]) => {
+    const promises = ids.map(id => {
       if (!managedShards.find(s => s.id === id)) {
-        handleAddShard(id);
+        return handleAddShard(id, 'ALL', { silentError: true });
       }
+      return Promise.resolve(true);
     });
+
+    const results = await Promise.all(promises);
+    const missing: string[] = [];
+    results.forEach((success, index) => {
+      if (!success) missing.push(ids[index]);
+    });
+
+    if (missing.length > 0) {
+      alert('Shards not found: ' + missing.join(', '));
+    }
   };
 
   const handleToggleShard = (id: string, mode: ShardViewMode) => {
@@ -155,18 +203,66 @@ function App() {
     }
   };
 
-  const handleSearch = () => {
+  const handleSearch = async () => {
+    // 1. Check loaded shards first (visible nodes)
     const node = displayNodes.find(n => n.node_id === searchId);
     if (node) {
       setSelectedNode(node);
       graphRef.current?.focusNode(node.node_id);
-    } else {
+      return;
+    }
+
+    // 2. Node not in loaded shards - check if shard can be resolved
+    if (!providerRef.current) {
+      alert('Node not found (must be in a loaded/visible shard)');
+      return;
+    }
+
+    try {
+      const shardId = await providerRef.current.getNodeShard(searchId);
+      if (shardId) {
+        // 3. Check if shard is already loaded but collapsed
+        const existingShard = managedShards.find(s => s.id === shardId);
+        if (existingShard) {
+          // Shard is loaded but collapsed (mode !== 'ALL') - uncollapse it
+          if (existingShard.mode !== 'ALL') {
+            handleToggleShard(shardId, 'ALL');
+          }
+          // Focus on the node from the cache
+          setTimeout(() => {
+            graphRef.current?.focusNode(searchId);
+            const loadedNode = shardCache.get(shardId)?.nodes.find(n => n.node_id === searchId);
+            if (loadedNode) setSelectedNode(loadedNode);
+          }, 100);
+          return;
+        }
+
+        // 4. Shard not loaded - ask user if they want to load it
+        const shouldLoad = window.confirm(
+          `Node ${searchId} belongs to shard ${shardId} which is not loaded.\n\nDo you want to load this shard?`
+        );
+        if (shouldLoad) {
+          const success = await handleAddShard(shardId, 'ALL');
+          if (success) {
+            // Wait for state update, then focus
+            setTimeout(() => {
+              graphRef.current?.focusNode(searchId);
+              // Find and select the node from the newly loaded shard
+              const loadedNode = shardCache.get(shardId)?.nodes.find(n => n.node_id === searchId);
+              if (loadedNode) setSelectedNode(loadedNode);
+            }, 100);
+          }
+        }
+      } else {
+        alert('Node not found in any shard');
+      }
+    } catch (e) {
       alert('Node not found (must be in a loaded/visible shard)');
     }
   };
 
   const handleFindPath = async () => {
-    if (!pathSourceId || !pathTargetId) return;
+    if (!pathSourceId || !pathTargetId || !providerRef.current) return;
     setIsPathLoading(true);
     try {
       const path = await providerRef.current.findPath(pathSourceId, pathTargetId);
@@ -203,8 +299,23 @@ function App() {
     setActivePath(null);
   };
 
-  const handleSelectRegion = (region: Region) => {
+  const handleSelectRegion = (region: Region, settings: AppSettings) => {
+    setAppSettings(settings);
     setActiveRegion(region);
+  };
+
+  // Point+Click map handler
+  const handleMapClick = (latlng: L.LatLng) => {
+    if (!isPointClickMode) return;
+
+    // Calculate S2 cell ID using configured level
+    const s2CellId = getS2CellId(latlng.lat, latlng.lng, appSettings.s2CellLevel);
+
+    // Add the shard using existing logic
+    handleAddShard(s2CellId, 'ALL');
+
+    // Exit point+click mode after adding
+    setIsPointClickMode(false);
   };
 
   if (!activeRegion) {
@@ -234,6 +345,10 @@ function App() {
           selectedNodeId={selectedNode?.node_id}
           pathEdges={pathEdges}
           pathNodes={pathNodesSet}
+          pathSourceId={pathSourceId}
+          pathTargetId={pathTargetId}
+          onMapClick={handleMapClick}
+          isPointClickMode={isPointClickMode}
         />
 
         {/* UI Overlay Controls - We need them ON TOP of the map */}
@@ -248,14 +363,16 @@ function App() {
             isLoading={isPathLoading}
           />
 
-          <div style={{ position: 'absolute', top: 10, left: 240, zIndex: 1001 }}>
+          <div ref={shardManagerPanelRef} style={{ position: 'absolute', top: 10, left: 240, zIndex: 1001 }}>
             <ShardManager
               shards={managedShards}
-              onAddShard={handleAddShardUI}
+              onAddShards={handleAddShardsUI}
               onToggleShard={handleToggleShard}
               onRemoveShard={handleRemoveShard}
               onHighlightShard={handleHighlightShard}
               onToggleAll={handleToggleAll}
+              isPointClickMode={isPointClickMode}
+              onTogglePointClickMode={() => setIsPointClickMode(prev => !prev)}
             />
           </div>
 
@@ -277,24 +394,26 @@ function App() {
               🔍
             </button>
           ) : (
-            <div style={{
-              position: 'fixed',
-              top: 10,
-              left: 10,
-              width: '300px',
-              color: 'white',
-              background: 'rgba(30,30,30,0.95)',
-              padding: '12px',
-              borderRadius: '8px',
-              zIndex: 9999,
-              backdropFilter: 'blur(4px)',
-              fontFamily: 'monospace',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-              border: '1px solid #444'
-            }}>
+            <div
+              ref={findNodePanelRef}
+              style={{
+                position: 'fixed',
+                top: 10,
+                left: 10,
+                width: '300px',
+                color: 'white',
+                background: 'rgba(30,30,30,0.95)',
+                padding: '12px',
+                borderRadius: '8px',
+                zIndex: 9999,
+                backdropFilter: 'blur(4px)',
+                fontFamily: 'monospace',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                border: '1px solid #444'
+              }}>
               <div style={{
                 fontWeight: 'bold', fontSize: '1rem', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '4px',
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center'
