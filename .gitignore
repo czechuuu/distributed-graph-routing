@@ -32,5 +32,5 @@ go.work.sum
 # .vscode/
 
 .venv/
-distributed_graph_routing.egg-info/
+*.egg-info/
 __pycache__

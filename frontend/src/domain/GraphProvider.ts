@@ -6,6 +6,7 @@ export interface GraphProvider {
     getOverlayGraph(): Promise<OverlayGraph>;
     getShard(shardId: string): Promise<ShardData>;
     findPath(srcNodeId: string, dstNodeId: string): Promise<NodeLocation[]>;
+    getNodeShard(nodeId: string): Promise<string | null>;
 }
 
 class LCG {
@@ -204,6 +205,19 @@ export class MockGraphProvider implements GraphProvider {
         }
         pathNodes.push(getShardNode(shardPath[shardPath.length - 1], dstNodeId));
         return pathNodes;
+    }
+
+    async getNodeShard(nodeId: string): Promise<string | null> {
+        // Mock node IDs follow the pattern: {shardId}-{nodeIndex}
+        const parts = nodeId.split('-');
+        if (parts.length >= 2) {
+            const shardId = parts[0];
+            const id = parseInt(shardId);
+            if (!isNaN(id) && id >= 0 && id < this.shardCount) {
+                return shardId;
+            }
+        }
+        return null;
     }
 
     private getShardDataSync(shardId: string, cx: number, cy: number): ShardData {
