@@ -42,3 +42,7 @@ gcloud compute scp vm_deploy.sh $INSTANCE_NAME:~/ --zone=$ZONE
 # Execute deployment on VM
 echo "Executing remote deployment..."
 gcloud compute ssh $INSTANCE_NAME --zone=$ZONE --command="chmod +x vm_deploy.sh && ./vm_deploy.sh routing-assets-repetitive routing-instance"
+
+# Cleanup
+echo "Cleaning up local artifacts..."
+rm project.tar.gz
