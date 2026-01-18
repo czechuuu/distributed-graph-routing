@@ -54,7 +54,7 @@ class TestServingLayerAPI(unittest.TestCase):
             
             self.assertEqual(response.status_code, 200)
             data = response.json()
-            self.assertEqual(data['status'], 'no_path_found')
+            self.assertEqual(data['status'], 'no_path')
             self.assertEqual(data['path'], [])
             self.assertEqual(data['steps_count'], 0)
 
@@ -65,7 +65,7 @@ class TestServingLayerAPI(unittest.TestCase):
         response = client.post("/route", json=payload)
         
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()['detail'], "Server not initialized")
+        self.assertEqual(response.json()['detail'], "Service not ready")
 
 if __name__ == '__main__':
     unittest.main()

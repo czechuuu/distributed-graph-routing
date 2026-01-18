@@ -65,7 +65,7 @@ class RouteResponse(BaseModel):
 # --- API Endpoints ---
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "mock": USE_MOCK}
 
 @app.post("/route", response_model=RouteResponse)
 def calculate_route(req: RouteRequest):
