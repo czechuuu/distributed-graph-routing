@@ -1,4 +1,3 @@
-
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
 from google.cloud.bigtable import row

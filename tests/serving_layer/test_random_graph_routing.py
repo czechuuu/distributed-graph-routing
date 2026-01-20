@@ -2,8 +2,8 @@ import unittest
 import networkx as nx
 import random
 import logging
-from typing import Dict, List, Tuple
-from collections import defaultdict
+from typing import Dict, List, Tuple, Optional, OrderedDict as OrderedDictType
+from collections import OrderedDict, defaultdict
 
 from fastapi.testclient import TestClient
 from serving_layer.app import app, state
@@ -18,18 +18,40 @@ from preprocessing.dataflow.algo import build_shard_graph, identify_boundary_nod
 client = TestClient(app)
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("StressTest")
 
 class LocalGraphFacade(GraphFacade):
     """
     A unified facade that holds all shards in memory to simulate Bigtable.
     """
-    def __init__(self, overlay_graph: nx.DiGraph, shard_graphs: Dict[int, nx.DiGraph], shortcuts_map: Dict[Tuple[int, int], List[int]]):
+    def __init__(self, overlay_graph: nx.DiGraph, shard_graphs: Dict[int, nx.DiGraph], shortcuts_map: Dict[Tuple[int, int], List[int]], max_cache_size: int = 10000):
         # Initialize parent with mock=True logic but we override accessors
-        super().__init__("test-proj", "test-instance", "shortcuts", "intra", use_mock=True)
+        super().__init__("test-proj", "test-instance", "shortcuts", "intra", "shortcuts_paths", use_mock=True)
         self.overlay = overlay_graph
         self.shard_graphs = shard_graphs
-        self.shortcut_expansions = shortcuts_map
+        # In this Mock, shortcuts_map acts as the "Bigtable Backing Store"
+        self.backing_shortcuts = shortcuts_map
+        self.shortcut_expansions = OrderedDictType() # Start empty to test lazy loading!
+        self.known_shortcuts = set(shortcuts_map.keys())
+
+    def get_expansion(self, u: int, v: int) -> Optional[List[int]]:
+        """Mock implementation that simulates the Cache + Fetch logic"""
+        # 1. Check known
+        if (u, v) not in self.known_shortcuts:
+            return None
+            
+        # 2. Check Cache
+        if (u, v) in self.shortcut_expansions:
+            self.shortcut_expansions.move_to_end((u, v))
+            return self.shortcut_expansions[(u, v)]
+            
+        # 3. "Fetch" from backing store
+        if (u, v) in self.backing_shortcuts:
+            path = self.backing_shortcuts[(u, v)]
+    
+            self.shortcut_expansions[(u, v)] = path
+            return path
+            
+        return None
 
     def _merge_shard_into_graph(self, graph: nx.DiGraph, shard_id: int):
         """Merges the specific shard graph into the query graph from memory."""
@@ -38,6 +60,9 @@ class LocalGraphFacade(GraphFacade):
             # Copy edges from shard graph to query graph
             for u, v, data in shard_G.edges(data=True):
                 graph.add_edge(u, v, weight=data['weight'])
+
+import logging
+logger = logging.getLogger(__name__)
 
 class TestRandomGraphRouting(unittest.TestCase):
     
@@ -203,6 +228,8 @@ class TestRandomGraphRouting(unittest.TestCase):
                 success_count += 1
                 
         logger.info(f"Successfully verified {success_count} queries.")
+    
+
 
 if __name__ == '__main__':
     unittest.main()

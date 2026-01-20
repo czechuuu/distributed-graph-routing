@@ -1,11 +1,12 @@
 import os
-import sys
 import logging
-import contextlib
-from typing import Dict, Optional, List
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from google.cloud import bigquery
+from typing import List, Optional
+import contextlib
 
 from .graph_facade import GraphFacade
 from .engine import find_shortest_path
@@ -13,111 +14,85 @@ from .engine import find_shortest_path
 # --- Configuration ---
 PROJECT_ID = os.getenv("PROJECT_ID", "repetitive-shortest-paths")
 INSTANCE_ID = os.getenv("INSTANCE_ID", "routing-instance")
-# Use --mock to run in mock mode
+# Change to False in production environment
 USE_MOCK = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ServingLayer")
 
-# --- Global State ---
 class AppState:
-    facade: Optional[GraphFacade] = None
     facade: Optional[GraphFacade] = None
 
 state = AppState()
-# TODO: We should consider implementing a Bigtable Index Table (NodeID -> ShardID) or sth 
-# to allow looking up shards dynamically without memory overhead.
-# For now, we require the client to provide the shard ID.
-# (At least I don't see any way to get shard ID based on node ID).
 
-# --- Lifespan ---
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    logger.info(f"Starting Server (Mock={USE_MOCK})...")
-    
+    logger.info("Initializing GraphFacade...")
     try:
+        # Initialize connection to Bigtable
         state.facade = GraphFacade(
-            PROJECT_ID, INSTANCE_ID, "shortcuts", "intra_edges", use_mock=USE_MOCK
+            project_id=PROJECT_ID, 
+            instance_id=INSTANCE_ID, 
+
+            overlay_table_id="overlay_graph", 
+            shortcuts_table_id="shortcuts",
+            intra_table_id="shards", 
+            use_mock=USE_MOCK
         )
-        logger.info("GraphFacade Initialized")
     except Exception as e:
-        logger.critical(f"Failed to connect to Bigtable: {e}")
-        sys.exit(1)
-
-    if USE_MOCK:
-        # Inject Topology
-        # Shard 1: 1 -> 2 -> 3 (Exit)
-        # Overlay: 3 -> 4 (Bridge)
-        # Shard 2: 4 (Entry) -> 5
-        # Shortcut: 1 -> 3
-        if state.facade:
-            state.facade.overlay.add_edge(3, 4, weight=1.0)
-            state.facade.overlay.add_edge(1, 3, weight=1.5)
-            state.facade.shortcut_expansions[(1, 3)] = [1, 2, 3]
-
-            state.facade.overlay.add_edge(1, 2, weight=1.0)
-            state.facade.overlay.add_edge(2, 3, weight=1.0)
-            state.facade.overlay.add_edge(4, 5, weight=1.0)
-
+        logger.error(f"Failed to init Bigtable: {e}")
     yield
-    # Shutdown
     logger.info("Shutting down...")
 
-# --- App Definition ---
-app = FastAPI(title="Distributed Graph Routing API", lifespan=lifespan)
+app = FastAPI(lifespan=lifespan)
 
-# --- Models ---
+# --- CORS Configuration ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Data Models ---
 class RouteRequest(BaseModel):
     start_node: int
     start_node_shard: int
     end_node: int
     end_node_shard: int
 
+class Coordinate(BaseModel):
+    lat: float
+    lng: float
+
 class RouteResponse(BaseModel):
     path: List[int]
+    coordinates: List[Optional[Coordinate]]
     status: str
     steps_count: int
 
-# --- Endpoints ---
+# --- API Endpoints ---
 @app.get("/health")
-@app.get("/health")
-def health_check():
+def health():
     return {"status": "ok", "mock": USE_MOCK}
 
 @app.post("/route", response_model=RouteResponse)
-def get_route(req: RouteRequest):
-    if state.facade is None:
-        raise HTTPException(status_code=503, detail="Server not initialized")
-
-    u, v = req.start_node, req.end_node
+def calculate_route(req: RouteRequest):
+    if not state.facade:
+        raise HTTPException(503, "Service not ready")
     
-    u, v = req.start_node, req.end_node
-    shard_u, shard_v = req.start_node_shard, req.end_node_shard
+    node_map = {req.start_node: req.start_node_shard, req.end_node: req.end_node_shard}
+    path = find_shortest_path(state.facade, req.start_node, req.end_node, node_map)
     
-    node_map = {u: shard_u, v: shard_v} # Engine expects this dict for involved nodes
-
-    try:
-        path = find_shortest_path(state.facade, u, v, node_map)
-    except Exception as e:
-        logger.error(f"Routing error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
     if not path:
-        return RouteResponse(path=[], status="no_path_found", steps_count=0)
+        return RouteResponse(path=[], coordinates=[], status="no_path", steps_count=0)
 
-    return RouteResponse(path=path, status="success", steps_count=len(path))
+    # Retrieve coordinates for the path
+    coords = []
+    for n in path:
+        c = state.facade.get_node_coords(n)
+        coords.append(Coordinate(lat=c[0], lng=c[1]) if c else None)
 
-if __name__ == "__main__":
-    import argparse
-    import uvicorn
-
-    parser = argparse.ArgumentParser(description="Start the serving layer.")
-    parser.add_argument("--mock", action="store_true", help="Enable mock mode")
-    args = parser.parse_args()
-
-    if args.mock:
-        USE_MOCK = True
-        logger.info("Mock mode enabled via CLI flag.")
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    return RouteResponse(path=path, coordinates=coords, status="success", steps_count=len(path))   
+     

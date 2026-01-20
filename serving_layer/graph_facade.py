@@ -1,71 +1,63 @@
 import logging
 import networkx as nx
+from typing import Dict, List, Tuple
 
 logger = logging.getLogger("GraphFacade")
 
 try:
     from google.cloud import bigtable
-    from google.cloud.bigtable import row_filters
 except ImportError:
     bigtable = None
-    row_filters = None
-    logger.warning("google-cloud-bigtable not installed. Only mock mode will work.")
-from typing import Dict, List, Tuple
+    logger.warning("google-cloud-bigtable not installed.")
 
-from .storage_types import bigtable_storage_pb2
+from serving_layer.storage_types import bigtable_storage_pb2
 
 class GraphFacade:
-    def __init__(self, project_id: str, instance_id: str, overlay_table_id: str, intra_table_id: str, use_mock: bool = False):
+    def __init__(self, project_id: str, instance_id: str, overlay_table_id: str, shortcuts_table_id: str, intra_table_id: str, use_mock: bool = False):
         self.use_mock = use_mock
         self.overlay = nx.DiGraph()
-        self.shortcut_expansions: Dict[Tuple[int, int], List[int]] = {}
+        # Cache for expansions of shortcuts (to avoid asking Bigtable for the same thing repeatedly)
+        self.shortcut_cache: Dict[Tuple[int, int], List[int]] = {}
+        self.node_coord_cache: Dict[int, Tuple[float, float]] = {}
         
         if not self.use_mock:
-            self.client = bigtable.Client(project=project_id, admin=True)
-            self.instance = self.client.instance(instance_id)
-            self.overlay_table = self.instance.table(overlay_table_id)
-            self.intra_table = self.instance.table(intra_table_id)
-            
-            self._load_overlay_graph()
-        else:
-            logger.info("GraphFacade initialized in mock mode.")
+            try:
+                self.client = bigtable.Client(project=project_id, admin=True)
+                self.instance = self.client.instance(instance_id)
+                self.overlay_table = self.instance.table(overlay_table_id)
+                self.shortcuts_table = self.instance.table(shortcuts_table_id)
+                self.intra_table = self.instance.table(intra_table_id)
+                self._load_overlay_graph()
+            except Exception as e:
+                logger.error(f"Bigtable connection failed: {e}")
 
     def _load_overlay_graph(self):
         """Loads Overlay using Pure Protobuf."""
         logger.info("Loading Overlay Graph from Bigtable (Protobuf)...")
         try:
-            rows = self.overlay_table.read_rows()
-            for row in rows:
-                # Load Proto structure
-                cell_proto = row.cells.get('cf', {}).get(b'shortcuts_proto', [])
-                
-                # Parse Shortcuts
-                if cell_proto:
-                    overlay_pb = bigtable_storage_pb2.OverlayGraph()
-                    overlay_pb.ParseFromString(cell_proto[0].value)
-                    
-                    for edge in overlay_pb.shortcuts:
-                        u, v, w = edge.from_node_id, edge.to_node_id, edge.weight
-                        self.overlay.add_edge(u, v, weight=w)
-                        
-                        # Store expansion path directly from Proto
-                        if edge.path:
-                            path_list = list(edge.path)
-                            self.shortcut_expansions[(u, v)] = path_list
-                            
-                        # Handle Bidirectionality
-                        if edge.bidirectional:
-                            self.overlay.add_edge(v, u, weight=w)
-                            if edge.path:
-                                self.shortcut_expansions[(v, u)] = list(edge.path)[::-1]
+            row_key = b"O#"
+            row = self.overlay_table.read_row(row_key)
+            
+            if not row:
+                logger.warning("Overlay row 'O#' not found!")
+                return
 
-                # Parse Bridges (Inter-shard edges)
-                cell_bridges = row.cells.get('cf', {}).get(b'inter_edges_proto', [])
-                if cell_bridges:
-                    bridges_pb = bigtable_storage_pb2.OverlayGraph()
-                    bridges_pb.ParseFromString(cell_bridges[0].value)
-                    for edge in bridges_pb.bridges:
-                        self.overlay.add_edge(edge.from_node_id, edge.to_node_id, weight=edge.weight)
+            cell = row.cells.get('cf', {}).get(b'val', [])
+            
+            if cell:
+                overlay_pb = bigtable_storage_pb2.OverlayGraph()
+                overlay_pb.ParseFromString(cell[0].value)
+                
+                # Load shortcuts (only topology)
+                for edge in overlay_pb.shortcuts:
+                    u, v, w = edge.from_node_id, edge.to_node_id, edge.weight
+                    self.overlay.add_edge(u, v, weight=w)
+                    if edge.bidirectional:
+                        self.overlay.add_edge(v, u, weight=w)
+
+                # Load bridges
+                for edge in overlay_pb.bridges:
+                    self.overlay.add_edge(edge.from_node_id, edge.to_node_id, weight=edge.weight)
                         
             logger.info(f"Overlay Loaded. Nodes: {self.overlay.number_of_nodes()}, Edges: {self.overlay.number_of_edges()}")
             
@@ -73,24 +65,17 @@ class GraphFacade:
             logger.error(f"Error loading Overlay: {e}")
 
     def get_query_graph(self, start_node: int, end_node: int, node_to_shard: Dict[int, int]) -> nx.DiGraph:
-        """
-        Builds the specific graph for a query by combining:
-        1. The Overlay Graph (Highways)
-        2. Full detailed graph of the Start Shard
-        3. Full detailed graph of the End Shard
-        """
-        # Start with the Overlay Graph
         query_graph = self.overlay.copy()
         
         start_shard = node_to_shard.get(start_node)
         end_shard = node_to_shard.get(end_node)
         
         if start_shard is None or end_shard is None:
-            raise ValueError("Start or End node not found in shard mapping.")
+            logger.warning("Start or End node not found in shard mapping.")
+            return query_graph
 
         logger.info(f"Fetching Start Shard {start_shard}...")
         self._merge_shard_into_graph(query_graph, start_shard)
-        
         if start_shard != end_shard:
             logger.info(f"Fetching End Shard {end_shard}...")
             self._merge_shard_into_graph(query_graph, end_shard)
@@ -98,22 +83,61 @@ class GraphFacade:
         return query_graph
 
     def _merge_shard_into_graph(self, graph: nx.DiGraph, shard_id: int):
-        """Fetches intra-edges using Protobuf."""
         if self.use_mock: return
+        try:
+            row_key = f"S#{shard_id}".encode('utf-8')
+            row = self.intra_table.read_row(row_key)
+            
+            if row:
+                cell = row.cells.get('cf', {}).get(b'val', [])
+                if cell:
+                    shard_pb = bigtable_storage_pb2.ShardGraph()
+                    shard_pb.ParseFromString(cell[0].value)
+                    
+                    logger.info(f"Shard Content: {len(shard_pb.edges)} edges, {len(shard_pb.locations)} locations")
+                    
+                    # Add nodes explicitly (important for source/target nodes)
+                    for loc in shard_pb.locations:
+                         self.node_coord_cache[loc.node_id] = (loc.x, loc.y)
+                         graph.add_node(loc.node_id, x=loc.x, y=loc.y)
 
-        row_key = f"{shard_id}".encode('utf-8')
-        row = self.intra_table.read_row(row_key)
-        
-        if row:
-            # Load Proto for the whole shard
-            cell = row.cells.get('cf', {}).get(b'val', [])
-            if cell:
-                shard_pb = bigtable_storage_pb2.ShardGraph()
-                shard_pb.ParseFromString(cell[0].value)
-                
-                for edge in shard_pb.edges:
-                    graph.add_edge(
-                        edge.from_node_id, 
-                        edge.to_node_id, 
-                        weight=edge.weight
-                    )
+                    for edge in shard_pb.edges:
+                        graph.add_edge(edge.from_node_id, edge.to_node_id, weight=edge.weight)
+        except Exception as e:
+            logger.warning(f"Failed to load shard {shard_id}: {e}")
+
+    def get_expansion(self, u: int, v: int) -> List[int]:
+        """
+        Fetches the full path for shortcut u->v.
+        First checks cache, then Bigtable (row P#u#v).
+        """
+        # Check cache
+        if (u, v) in self.shortcut_cache:
+            return self.shortcut_cache[(u, v)]
+
+        # Fetch from Bigtable
+        if self.use_mock: 
+            return []
+
+        try:
+            row_key = f"P#{u}#{v}".encode('utf-8')
+            row = self.shortcuts_table.read_row(row_key) # Shortcuts table
+            
+            if row:
+                cell = row.cells.get('cf', {}).get(b'val', [])
+                if cell:
+                    path_proto = bigtable_storage_pb2.ShortcutPath()
+                    path_proto.ParseFromString(cell[0].value)
+                    path = list(path_proto.nodes)
+                    
+                    # Save in cache for future use
+                    self.shortcut_cache[(u, v)] = path
+                    return path
+        except Exception as e:
+            logger.warning(f"Failed to fetch expansion for {u}->{v}: {e}")
+            
+    def get_node_coords(self, node_id: int) -> Tuple[float, float]:
+        """Returns (lat, lng) for a node if found in cache."""
+        return self.node_coord_cache.get(node_id)
+            
+        return []

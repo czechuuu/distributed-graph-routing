@@ -34,3 +34,4 @@ go.work.sum
 .venv/
 *.egg-info/
 __pycache__
+.DS_Store
