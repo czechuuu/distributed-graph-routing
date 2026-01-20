@@ -86,19 +86,3 @@ def calculate_route(req: RouteRequest):
 
     return RouteResponse(path=path, coordinates=coords, status="success", steps_count=len(path))
 
-# --- Static File Serving (React Frontend) ---
-static_dir = os.path.join(os.path.dirname(__file__), "static")
-
-if os.path.exists(static_dir):
-    # Serve assets (JS, CSS, Images)
-    app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
-
-    # Catch-all route for React SPA (Single Page Application)
-    @app.get("/{full_path:path}")
-    async def serve_react(full_path: str):
-        # Do not intercept API calls
-        if full_path.startswith("route") or full_path.startswith("health"):
-            return {"status": "not_found_in_api"}
-        
-        # Return index.html for any other path to let React Router handle it
-        return FileResponse(os.path.join(static_dir, "index.html"))
