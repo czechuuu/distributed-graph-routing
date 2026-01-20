@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import contextlib
@@ -45,6 +46,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# --- CORS Configuration ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # --- Data Models ---
 class RouteRequest(BaseModel):
     start_node: int
@@ -84,5 +94,5 @@ def calculate_route(req: RouteRequest):
         c = state.facade.get_node_coords(n)
         coords.append(Coordinate(lat=c[0], lng=c[1]) if c else None)
 
-    return RouteResponse(path=path, coordinates=coords, status="success", steps_count=len(path))
-
+    return RouteResponse(path=path, coordinates=coords, status="success", steps_count=len(path))   
+     
