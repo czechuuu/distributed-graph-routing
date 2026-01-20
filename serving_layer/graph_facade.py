@@ -122,7 +122,7 @@ class GraphFacade:
             return
             
         try:
-            # 1. Look up Node Index (get NodeLocation)
+            # Look up Node Index (get NodeLocation)
             node_rowset = RowSet()
             for n in missing_nodes:
                 node_rowset.add_row_key(f"N#{n}".encode('utf-8'))
