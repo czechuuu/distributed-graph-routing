@@ -37,6 +37,7 @@ async def lifespan(app: FastAPI):
             overlay_table_id="overlay_graph", 
             shortcuts_table_id="shortcuts",
             intra_table_id="shards", 
+            node_index_table_id="node_index",
             use_mock=USE_MOCK
         )
     except Exception as e:
@@ -87,6 +88,9 @@ def calculate_route(req: RouteRequest):
     
     if not path:
         return RouteResponse(path=[], coordinates=[], status="no_path", steps_count=0)
+
+    # Prefetch missing coordinates
+    state.facade.prefetch_coords(path)
 
     # Retrieve coordinates for the path
     coords = []
