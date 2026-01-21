@@ -110,6 +110,9 @@ class GraphFacade:
         except Exception as e:
             logger.warning(f"Failed to load shard {shard_id}: {e}")
 
+
+BATCH_SIZE = 1000
+
     def prefetch_coords(self, node_ids: List[int]):
         """
         Prefetches coordinates for missing nodes. 
@@ -123,8 +126,7 @@ class GraphFacade:
             return
             
         # Chunking configuration
-        chunk_size = 1000
-        chunks = [missing_nodes[i:i + chunk_size] for i in range(0, len(missing_nodes), chunk_size)]
+        chunks = [missing_nodes[i:i + BATCH_SIZE] for i in range(0, len(missing_nodes), BATCH_SIZE)]
         
         def fetch_chunk(chunk):
             chunk_results = {}
@@ -177,8 +179,7 @@ class GraphFacade:
         if self.use_mock:
             return results
 
-        chunk_size = 1000
-        chunks = [missing_edges[i:i + chunk_size] for i in range(0, len(missing_edges), chunk_size)]
+        chunks = [missing_edges[i:i + BATCH_SIZE] for i in range(0, len(missing_edges), BATCH_SIZE)]
         
         def fetch_chunk(chunk):
             chunk_results = {}
