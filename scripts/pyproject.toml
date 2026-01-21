@@ -1,0 +1,11 @@
+[project]
+name = "osm-scripts"
+version = "0.1.0"
+description = "Scripts for downloading and processing OpenStreetMap data"
+requires-python = ">=3.11"
+dependencies = [
+    "osmium>=4.0.0",
+]
+
+[tool.uv]
+package = false
