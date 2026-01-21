@@ -58,7 +58,7 @@ class BigtableClient:
             return None
         
         try:
-            cell = row.cells['cf'][b'shard_graph_proto'][0]
+            cell = row.cells['cf'][b'val'][0]
             shard = pb.ShardGraph()
             shard.ParseFromString(cell.value)
             return shard

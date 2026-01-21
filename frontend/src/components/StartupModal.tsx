@@ -190,6 +190,29 @@ export const StartupModal: React.FC<StartupModalProps> = ({ onSelectRegion }) =>
                                     (smaller = larger cells)
                                 </span>
                             </div>
+
+                            {/* Serving Layer URL */}
+                            <div style={{ marginTop: '16px' }}>
+                                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', fontSize: '0.9rem' }}>
+                                    Serving Layer URL (Routing)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={settings.servingLayerUrl}
+                                    onChange={e => updateSetting('servingLayerUrl', e.target.value)}
+                                    placeholder="http://localhost:8001"
+                                    style={{
+                                        width: '100%',
+                                        padding: '10px 12px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #555',
+                                        background: 'rgba(255,255,255,0.1)',
+                                        color: 'white',
+                                        fontSize: '0.95rem',
+                                        boxSizing: 'border-box'
+                                    }}
+                                />
+                            </div>
                         </div>
                     )}
                 </div>

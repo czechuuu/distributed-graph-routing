@@ -11,7 +11,10 @@ export interface NodeLocation {
     x: number;
     y: number;
     type: NodeType;
+    /** True if node comes from routing response but is not in any loaded shard */
+    isPhantom?: boolean;
 }
+
 
 export interface Edge {
     from_node_id: string;

@@ -6,6 +6,7 @@ import { GraphRenderer } from './components/GraphRenderer';
 import type { GraphRendererHandle } from './components/GraphRenderer';
 import { MockGraphProvider } from './domain/GraphProvider';
 import { RemoteGraphProvider } from './domain/RemoteGraphProvider';
+import { ServingLayerClient } from './domain/ServingLayerClient';
 import { ShardManager } from './components/ShardManager';
 import { PathControl } from './components/PathControl';
 import type { ShardControlItem, ShardViewMode } from './components/ShardManager';
@@ -43,6 +44,7 @@ function App() {
   const [isPointClickMode, setIsPointClickMode] = useState(false);
 
   const providerRef = useRef<GraphProvider | null>(null);
+  const servingLayerClientRef = useRef<ServingLayerClient | null>(null);
 
   // Disable Leaflet event propagation on UI panels so text is selectable
   useEffect(() => {
@@ -64,6 +66,9 @@ function App() {
     } else {
       providerRef.current = new MockGraphProvider();
     }
+
+    // Create serving layer client
+    servingLayerClientRef.current = new ServingLayerClient(appSettings.servingLayerUrl);
 
     providerRef.current.getOverlayGraph().then(setOverlayGraph);
   }, [activeRegion, appSettings]);
@@ -262,24 +267,65 @@ function App() {
   };
 
   const handleFindPath = async () => {
-    if (!pathSourceId || !pathTargetId || !providerRef.current) return;
+    if (!pathSourceId || !pathTargetId || !providerRef.current || !servingLayerClientRef.current) return;
     setIsPathLoading(true);
     try {
-      const path = await providerRef.current.findPath(pathSourceId, pathTargetId);
-      setActivePath(path);
+      console.log('Finding path from', pathSourceId, 'to', pathTargetId);
 
-      // Auto-unhide shards involved in path
-      const involvedShardIds = new Set(path.map(n => n.shard_id));
+      // 1. Resolve shard IDs for source and target
+      console.log('Resolving shard IDs...');
+      const srcShard = await providerRef.current.getNodeShard(pathSourceId);
+      const dstShard = await providerRef.current.getNodeShard(pathTargetId);
+      console.log('Resolved shards:', srcShard, dstShard);
 
-      // 1. Trigger add for missing shards
-      involvedShardIds.forEach(sid => {
-        const isManaged = managedShards.some(s => s.id === sid);
-        if (!isManaged) {
-          handleAddShard(sid, 'PATH');
+      if (!srcShard || !dstShard) {
+        alert('Could not resolve shard for source or target node');
+        setIsPathLoading(false);
+        return;
+      }
+
+      // 2. Call serving layer routing
+      console.log('Calling serving layer:', appSettings.servingLayerUrl);
+      const response = await servingLayerClientRef.current.findRoute(
+        pathSourceId,
+        srcShard,
+        pathTargetId,
+        dstShard
+      );
+      console.log('Serving layer response:', response);
+
+      if (response.status !== 'success' || response.path.length === 0) {
+        alert('No path found');
+        setActivePath(null);
+        return;
+      }
+
+      // 3. Build path with phantom nodes for nodes not in loaded shards
+      const path: NodeLocation[] = response.path.map((nodeId, idx) => {
+        const nodeIdStr = nodeId.toString();
+        // Check if node exists in any loaded shard
+        for (const [_shardId, shardData] of shardCache.entries()) {
+          const known = shardData.nodes.find(n => n.node_id === nodeIdStr);
+          if (known) return known;
         }
+        // Node not in loaded shards - create phantom node
+        const coord = response.coordinates[idx];
+        return {
+          node_id: nodeIdStr,
+          shard_id: 'unknown',
+          x: coord?.lng ?? 0,  // x = longitude
+          y: coord?.lat ?? 0,  // y = latitude
+          type: NodeType.INTERNAL,
+          isPhantom: true
+        };
       });
 
-      // 2. Switch hidden shards to PATH mode
+      setActivePath(path);
+
+      // Auto-unhide known shards involved in path
+      const involvedShardIds = new Set(path.filter(n => !n.isPhantom).map(n => n.shard_id));
+
+      // Switch hidden shards to PATH mode
       setManagedShards(prev => prev.map(s => {
         if (involvedShardIds.has(s.id) && s.mode === 'NONE') {
           return { ...s, mode: 'PATH' };
@@ -288,6 +334,7 @@ function App() {
       }));
 
     } catch (e) {
+      console.error('Path finding error:', e);
       alert('Error finding path: ' + e);
       setActivePath(null);
     } finally {
@@ -349,6 +396,7 @@ function App() {
           pathTargetId={pathTargetId}
           onMapClick={handleMapClick}
           isPointClickMode={isPointClickMode}
+          activePath={activePath ?? undefined}
         />
 
         {/* UI Overlay Controls - We need them ON TOP of the map */}
