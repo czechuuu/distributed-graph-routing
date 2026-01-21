@@ -122,24 +122,39 @@ class GraphFacade:
         if not missing_nodes:
             return
             
-        try:
-            # Look up Node Index (get NodeLocation)
-            node_rowset = RowSet()
-            for n in missing_nodes:
-                node_rowset.add_row_key(f"N#{n}".encode('utf-8'))
+        # Chunking configuration
+        chunk_size = 1000
+        chunks = [missing_nodes[i:i + chunk_size] for i in range(0, len(missing_nodes), chunk_size)]
+        
+        def fetch_chunk(chunk):
+            chunk_results = {}
+            try:
+                node_rowset = RowSet()
+                for n in chunk:
+                    node_rowset.add_row_key(f"N#{n}".encode('utf-8'))
+                    
+                rows = self.node_index_table.read_rows(row_set=node_rowset)
                 
-            rows = self.node_index_table.read_rows(row_set=node_rowset)
-            
-            for row in rows:
-                # Try to get coordinates directly
-                loc_cell = row.cells.get('cf', {}).get(b'loc', [])
-                if loc_cell:
-                    loc_pb = bigtable_storage_pb2.NodeLocation()
-                    loc_pb.ParseFromString(loc_cell[0].value)
-                    self.node_coord_cache[loc_pb.node_id] = (loc_pb.x, loc_pb.y)
-                        
-        except Exception as e:
-            logger.error(f"Error in prefetch_coords: {e}")
+                for row in rows:
+                    loc_cell = row.cells.get('cf', {}).get(b'loc', [])
+                    if loc_cell:
+                        loc_pb = bigtable_storage_pb2.NodeLocation()
+                        loc_pb.ParseFromString(loc_cell[0].value)
+                        chunk_results[loc_pb.node_id] = (loc_pb.x, loc_pb.y)
+            except Exception as e:
+                logger.error(f"Error fetching chunk: {e}")
+            return chunk_results
+
+        logger.info(f"Fetching {len(missing_nodes)} missing coords in {len(chunks)} parallel chunks...")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_chunk = {executor.submit(fetch_chunk, chunk): chunk for chunk in chunks}
+            for future in concurrent.futures.as_completed(future_to_chunk):
+                try:
+                    chunk_data = future.result()
+                    self.node_coord_cache.update(chunk_data)
+                except Exception as e:
+                    logger.error(f"Chunk fetch failed: {e}")
 
     def get_expansions_batch(self, edges: List[Tuple[int, int]]) -> Dict[Tuple[int, int], List[int]]:
         """
