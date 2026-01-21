@@ -1,15 +1,31 @@
 import functions_framework
-from graph_manager import handle_file_upload
+from graph_manager import load_and_process_file, trigger_pipeline
 
-@functions_framework.cloud_event
-def process_graph_upload(cloud_event):
+@functions_framework.http
+def process_manual_trigger(request):
     """
-    Entry point for the Cloud Function.
-    Extracts event data and delegates processing to the graph manager.
+    HTTP Cloud Function to manually trigger graph processing and Dataflow pipeline.
+    Expects a JSON payload with {"bucket": "your-bucket-name"}.
     """
-    data = cloud_event.data
-    bucket = data["bucket"]
-    file_name = data["name"]
+    request_json = request.get_json(silent=True)
     
-    print(f"Received event for file: {file_name} in bucket: {bucket}")
-    handle_file_upload(bucket, file_name)
+    if request_json and 'bucket' in request_json:
+        bucket = request_json['bucket']
+    else:
+        return 'Missing "bucket" in request JSON', 400
+
+    print(f"Manual trigger received for bucket: {bucket}")
+
+    # Process nodes and edges
+    # We explicitly look for these two files as per the requirements
+    print("Loading nodes...")
+    load_and_process_file(bucket, "graph_data/nodes.csv")
+    
+    print("Loading edges...")
+    load_and_process_file(bucket, "graph_data/edges.csv")
+    
+    # Trigger the pipeline unconditionally
+    print("Triggering pipeline...")
+    trigger_pipeline()
+
+    return 'Processing started successfully', 200

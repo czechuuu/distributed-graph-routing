@@ -1,6 +1,6 @@
 import os
 import pathlib
-from datetime import timedelta
+
 from google.cloud import bigquery
 from dataflow.pipeline import create_pipeline
 
@@ -20,12 +20,9 @@ OVERLAY_TABLE = "overlay_graph"
 NODE_INDEX_TABLE = "node_index"
 REGION = "us-central1"
 
-def handle_file_upload(bucket, file_name):
+def load_and_process_file(bucket, file_name):
     """
-    Main logic to handle the file upload:
-    1. Determines file type (nodes vs edges).
-    2. Loads data into BigQuery.
-    3. Triggers Dataflow pipeline if conditions are met.
+    Loads data into BigQuery and processes it (e.g., adding ShardId for nodes).
     """
     uri = f"gs://{bucket}/{file_name}"
     client = bigquery.Client(project=PROJECT_ID)
@@ -91,54 +88,6 @@ def handle_file_upload(bucket, file_name):
         print(f"Running ShardId update query for {table_id}...")
         client.query(setup_query).result()
         print("ShardId column ensured and values calculated.")
-
-    # Check if we should trigger the contraction pipeline
-    check_and_trigger_pipeline(client, table_name)
-
-def check_and_trigger_pipeline(client, current_table_name):
-    """
-    Checks if both nodes and edges tables have been updated recently.
-    Triggers the Dataflow pipeline if so.
-    """
-    nodes_table_id = f"{PROJECT_ID}.{DATASET_ID}.nodes"
-    edges_table_id = f"{PROJECT_ID}.{DATASET_ID}.edges"
-
-    try:
-        nodes_table = client.get_table(nodes_table_id)
-        edges_table = client.get_table(edges_table_id)
-    except Exception as e:
-        print(f"Error fetching table metadata: {e}")
-        return
-
-    t_nodes = nodes_table.modified
-    t_edges = edges_table.modified
-    
-    # Use current table timestamp reference
-    if current_table_name == "nodes":
-        t_current = t_nodes
-        t_other = t_edges
-    else:
-        t_current = t_edges
-        t_other = t_nodes
-
-    print(f"Nodes modified: {t_nodes}, Edges modified: {t_edges}")
-
-    # Threshold for considering them "triggered together"
-    # 30 seconds to prevent triggers from consecutive test runs
-    threshold = timedelta(seconds=30)
-    
-    # Check if they are close in time
-    time_diff = abs(t_nodes - t_edges)
-    if time_diff > threshold:
-        print(f"Time difference {time_diff} > {threshold}. Not triggering pipeline.")
-        return
-
-    # Logic to ensure only one specific invocation triggers it.    
-    if t_current >= t_other:
-        print("Triggering Contraction Pipeline...")
-        trigger_pipeline()
-    else:
-        print(f"Current table ({current_table_name}) is older than other table. Waiting for other trigger (or it already happened).")
 
 def trigger_pipeline():
     current_dir = pathlib.Path(__file__).parent.absolute()
