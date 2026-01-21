@@ -15,6 +15,8 @@ except ImportError:
 
 from serving_layer.storage_types import bigtable_storage_pb2
 
+BATCH_SIZE = 1000
+
 class GraphFacade:
     def __init__(self, project_id: str, instance_id: str, overlay_table_id: str, shortcuts_table_id: str, intra_table_id: str, node_index_table_id: str, use_mock: bool = False):
         self.use_mock = use_mock
@@ -55,9 +57,9 @@ class GraphFacade:
                 # Load shortcuts (only topology)
                 for edge in overlay_pb.shortcuts:
                     u, v, w = edge.from_node_id, edge.to_node_id, edge.weight
-                    self.overlay.add_edge(u, v, weight=w)
+                    self.overlay.add_edge(u, v, weight=w, is_shortcut=True)
                     if edge.bidirectional:
-                        self.overlay.add_edge(v, u, weight=w)
+                        self.overlay.add_edge(v, u, weight=w, is_shortcut=True)
 
                 # Load bridges
                 for edge in overlay_pb.bridges:
@@ -67,6 +69,12 @@ class GraphFacade:
             
         except Exception as e:
             logger.error(f"Error loading Overlay: {e}")
+
+    def is_shortcut(self, u: int, v: int) -> bool:
+        """Checks if an edge is marked as a shortcut in the overlay."""
+        if self.overlay.has_edge(u, v):
+            return self.overlay[u][v].get('is_shortcut', False)
+        return False
 
     def get_query_graph(self, start_node: int, end_node: int, node_to_shard: Dict[int, int]) -> nx.DiGraph:
         query_graph = self.overlay.copy()
@@ -111,7 +119,7 @@ class GraphFacade:
             logger.warning(f"Failed to load shard {shard_id}: {e}")
 
 
-BATCH_SIZE = 1000
+
 
     def prefetch_coords(self, node_ids: List[int]):
         """
@@ -171,7 +179,9 @@ BATCH_SIZE = 1000
             if (u, v) in self.shortcut_cache:
                 results[(u, v)] = self.shortcut_cache[(u, v)]
             else:
-                missing_edges.append((u, v))
+                # Optimized check: Only fetch if it's actually marked as a shortcut
+                if self.is_shortcut(u, v):
+                    missing_edges.append((u, v))
 
         if not missing_edges:
             return results
@@ -230,6 +240,10 @@ BATCH_SIZE = 1000
         # Check cache
         if (u, v) in self.shortcut_cache:
             return self.shortcut_cache[(u, v)]
+        
+        # Optimization: Don't check Bigtable if it's not a shortcut
+        if not self.is_shortcut(u, v):
+            return []
 
         # Fetch from Bigtable
         if self.use_mock: 
