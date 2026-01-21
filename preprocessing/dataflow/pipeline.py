@@ -172,6 +172,14 @@ class CreateNodeIndexMutation(beam.DoFn):
         lookup_proto.shard_id = element.shard_id
         
         direct_row.set_cell('cf', 'val', lookup_proto.SerializeToString())
+        
+        # Add Node Location
+        loc_proto = bigtable_storage_pb2.NodeLocation()
+        loc_proto.node_id = element.id
+        loc_proto.x = element.x
+        loc_proto.y = element.y
+        direct_row.set_cell('cf', 'loc', loc_proto.SerializeToString())
+
         yield direct_row
 
 def create_pipeline(project, temp_location, input_nodes, input_edges, instance, shortcuts_table, shards_table, overlay_table, node_index_table, setup_file, pipeline_args=None):
