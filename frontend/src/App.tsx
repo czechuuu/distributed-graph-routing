@@ -6,12 +6,12 @@ import { GraphRenderer } from './components/GraphRenderer';
 import type { GraphRendererHandle } from './components/GraphRenderer';
 import { MockGraphProvider } from './domain/GraphProvider';
 import { RemoteGraphProvider } from './domain/RemoteGraphProvider';
+import { ServingLayerClient } from './domain/ServingLayerClient';
 import { ShardManager } from './components/ShardManager';
 import { PathControl } from './components/PathControl';
 import type { ShardControlItem, ShardViewMode } from './components/ShardManager';
 import type { NodeLocation, Edge, OverlayGraph, ShardData } from './domain/types';
 import { NodeType } from './domain/types';
-import { computeContraction } from './domain/pathLogic';
 import { StartupModal } from './components/StartupModal';
 import { type Region } from './domain/MapMetadata';
 import { getS2CellId } from './domain/s2utils';
@@ -41,8 +41,10 @@ function App() {
   const [managedShards, setManagedShards] = useState<ShardControlItem[]>([]);
   const [shardCache, setShardCache] = useState<Map<string, ShardData>>(new Map());
   const [isPointClickMode, setIsPointClickMode] = useState(false);
+  const [isFindNodeMode, setIsFindNodeMode] = useState(false);
 
   const providerRef = useRef<GraphProvider | null>(null);
+  const servingLayerClientRef = useRef<ServingLayerClient | null>(null);
 
   // Disable Leaflet event propagation on UI panels so text is selectable
   useEffect(() => {
@@ -65,69 +67,186 @@ function App() {
       providerRef.current = new MockGraphProvider();
     }
 
+    // Create serving layer client
+    servingLayerClientRef.current = new ServingLayerClient(appSettings.servingLayerUrl);
+
     providerRef.current.getOverlayGraph().then(setOverlayGraph);
   }, [activeRegion, appSettings]);
 
-  // Compute display data & Contraction Logic
+  // Helper to update LRU timestamp
+  const touchShard = (id: string) => {
+    setManagedShards(prev => prev.map(s =>
+      s.id === id ? { ...s, lastAccessedAt: Date.now() } : s
+    ));
+  };
+
+  // Compute display data - simplified with paths always drawn separately
   const { displayNodes, displayEdges, displayOverlayEdges, pathEdges, pathNodesSet } = useMemo(() => {
     const nodes: NodeLocation[] = [];
     const intraEdges: Edge[] = [];
 
-    // 0. Path Processing & Contraction
-    const { pathEdges: activePathEdges, pathNodesSet } = computeContraction(activePath, managedShards);
+    // Compute path edges from activePath (always visible)
+    const pathNodeIds = new Set(activePath?.map(n => n.node_id) ?? []);
+    const pathEdgesList: Edge[] = [];
+    if (activePath && activePath.length > 1) {
+      for (let i = 0; i < activePath.length - 1; i++) {
+        pathEdgesList.push({
+          from_node_id: activePath[i].node_id,
+          to_node_id: activePath[i + 1].node_id,
+          weight: 0,
+          bidirectional: false
+        });
+      }
+    }
 
-    // 1. Shard Content (Nodes/Intra-Edges)
+    // Collect nodes based on shard visibility mode
     managedShards.forEach(s => {
       const data = shardCache.get(s.id);
       if (!data) return;
 
       if (s.mode === 'ALL') {
-        // Full Shard
         nodes.push(...data.nodes);
         intraEdges.push(...data.edges);
-      } else if (s.mode === 'PATH') {
-        // Path Mode: Show Boundary Nodes + ONLY Path Nodes in this shard
-        const bNodes = data.nodes.filter(n => n.type === NodeType.BOUNDARY);
-        // Add path nodes that are in this shard (avoid duplicates with boundary)
-        const pNodes = data.nodes.filter(n => pathNodesSet.has(n.node_id) && n.type !== NodeType.BOUNDARY);
+      } else if (s.mode === 'BOUNDARIES') {
+        // Only boundary nodes, no intra-edges
+        nodes.push(...data.nodes.filter(n => n.type === NodeType.BOUNDARY));
+      }
+      // HIDDEN: add nothing by default
+    });
 
-        nodes.push(...bNodes, ...pNodes);
+    // Add selected node + neighbors (even from HIDDEN shards)
+    if (selectedNode) {
+      for (const [_shardId, data] of shardCache.entries()) {
+        const nodeInShard = data.nodes.find(n => n.node_id === selectedNode.node_id);
+        if (nodeInShard) {
+          // Add selected node if not already present
+          if (!nodes.find(n => n.node_id === selectedNode.node_id)) {
+            nodes.push(selectedNode);
+          }
 
-        // Add intra-edges that are part of path? Already in activePathEdges.
-        // What about intra-edges for context? Maybe not.
-      } else {
-        // NONE: Boundary Nodes + src/dest nodes (so they stay visible when collapsed)
-        nodes.push(...data.nodes.filter(n =>
-          n.type === NodeType.BOUNDARY ||
-          n.node_id === pathSourceId ||
-          n.node_id === pathTargetId
-        ));
+          // Find and add neighbors
+          const neighborIds = new Set<string>();
+          data.edges.forEach(e => {
+            if (e.from_node_id === selectedNode.node_id) neighborIds.add(e.to_node_id);
+            if (e.to_node_id === selectedNode.node_id) neighborIds.add(e.from_node_id);
+          });
+
+          const neighbors = data.nodes.filter(n =>
+            neighborIds.has(n.node_id) && !nodes.find(existing => existing.node_id === n.node_id)
+          );
+          nodes.push(...neighbors);
+
+          // Add connecting edges
+          const connectingEdges = data.edges.filter(e =>
+            e.from_node_id === selectedNode.node_id || e.to_node_id === selectedNode.node_id
+          );
+          intraEdges.push(...connectingEdges.filter(e => !intraEdges.find(
+            existing => existing.from_node_id === e.from_node_id && existing.to_node_id === e.to_node_id
+          )));
+
+          break;
+        }
+      }
+    }
+
+    // ALWAYS add path nodes (including phantom nodes from activePath)
+    if (activePath) {
+      activePath.forEach(pathNode => {
+        if (!nodes.find(n => n.node_id === pathNode.node_id)) {
+          nodes.push(pathNode);
+        }
+      });
+    }
+
+    // ALWAYS add src/dest nodes (even when their shard is hidden and they're not selected)
+    [pathSourceId, pathTargetId].forEach(nodeId => {
+      if (!nodeId) return;
+      if (nodes.find(n => n.node_id === nodeId)) return; // already added
+
+      // Find the node in any loaded shard
+      for (const [_shardId, data] of shardCache.entries()) {
+        const node = data.nodes.find(n => n.node_id === nodeId);
+        if (node) {
+          nodes.push(node);
+          break;
+        }
       }
     });
 
-    // 2. Overlay Edges
+    // Overlay edges filtering
     const validNodeIds = new Set(nodes.map(n => n.node_id));
     const filterOverlay = (edges: Edge[]) => edges.filter(e =>
       validNodeIds.has(e.from_node_id) && validNodeIds.has(e.to_node_id)
     );
 
-    const validBridges = filterOverlay(overlayGraph.bridges);
-    const validShortcuts = filterOverlay(overlayGraph.shortcuts);
-
     return {
       displayNodes: nodes,
       displayEdges: intraEdges,
-      displayOverlayEdges: { bridges: validBridges, shortcuts: validShortcuts },
-      pathEdges: activePathEdges,
-      pathNodesSet
+      displayOverlayEdges: { bridges: filterOverlay(overlayGraph.bridges), shortcuts: filterOverlay(overlayGraph.shortcuts) },
+      pathEdges: pathEdgesList,
+      pathNodesSet: pathNodeIds
     };
-  }, [managedShards, shardCache, overlayGraph, activePath, pathSourceId, pathTargetId]);
+  }, [managedShards, shardCache, overlayGraph, activePath, selectedNode, pathSourceId, pathTargetId]);
 
 
 
-  const handleAddShard = async (id: string, initialMode: ShardViewMode = 'ALL', options: { silentError?: boolean } = {}) => {
+  const handleAddShard = async (id: string, initialMode: ShardViewMode = 'HIDDEN', options: { silentError?: boolean } = {}) => {
     if (!providerRef.current) return false;
-    setManagedShards(prev => [...prev, { id, mode: initialMode }]);
+
+    // Already loaded?
+    const existingShard = managedShards.find(s => s.id === id);
+    if (existingShard) {
+      touchShard(id);
+      return true;
+    }
+
+    // LRU eviction if at capacity
+    if (managedShards.length >= appSettings.maxShards) {
+      const sorted = [...managedShards].sort((a, b) => a.lastAccessedAt - b.lastAccessedAt);
+
+      // Find first evictable shard (not containing src or dst)
+      for (const candidate of sorted) {
+        const shardData = shardCache.get(candidate.id);
+        const containsSrc = shardData?.nodes.some(n => n.node_id === pathSourceId);
+        const containsDst = shardData?.nodes.some(n => n.node_id === pathTargetId);
+
+        if (containsSrc || containsDst) {
+          continue; // Skip - protected shard
+        }
+
+        // Check if shard contains path nodes and convert to phantom
+        if (activePath && shardData) {
+          const pathNodeIds = new Set(activePath.map(n => n.node_id));
+          const pathNodesInShard = shardData.nodes.filter(n => pathNodeIds.has(n.node_id));
+
+          if (pathNodesInShard.length > 0) {
+            // Convert path nodes to phantom before evicting
+            setActivePath(prev => {
+              if (!prev) return prev;
+              return prev.map(n => {
+                if (pathNodesInShard.some(pn => pn.node_id === n.node_id)) {
+                  return { ...n, isPhantom: true, shard_id: 'evicted' };
+                }
+                return n;
+              });
+            });
+          }
+        }
+
+        // Evict this shard
+        setManagedShards(prev => prev.filter(s => s.id !== candidate.id));
+        setShardCache(prev => {
+          const next = new Map(prev);
+          next.delete(candidate.id);
+          return next;
+        });
+        break;
+      }
+    }
+
+    const now = Date.now();
+    setManagedShards(prev => [...prev, { id, mode: initialMode, lastAccessedAt: now }]);
+
     if (!shardCache.has(id)) {
       try {
         const shardData = await providerRef.current.getShard(id);
@@ -136,7 +255,8 @@ function App() {
           next.set(id, shardData);
           return next;
         });
-        if (initialMode !== 'NONE') graphRef.current?.fitToNodes(shardData.nodes);
+        // Don't auto-fit when adding as HIDDEN
+        if (initialMode !== 'HIDDEN') graphRef.current?.fitToNodes(shardData.nodes);
         return true;
       } catch (e) {
         if (!options.silentError) alert('Shard not found: ' + id);
@@ -146,12 +266,12 @@ function App() {
     }
     return true;
   };
-  // overload/wrapper for ShardManager compat
+
   // overload/wrapper for ShardManager compat
   const handleAddShardsUI = async (ids: string[]) => {
     const promises = ids.map(id => {
       if (!managedShards.find(s => s.id === id)) {
-        return handleAddShard(id, 'ALL', { silentError: true });
+        return handleAddShard(id, 'HIDDEN', { silentError: true });
       }
       return Promise.resolve(true);
     });
@@ -168,7 +288,7 @@ function App() {
   };
 
   const handleToggleShard = (id: string, mode: ShardViewMode) => {
-    setManagedShards(prev => prev.map(s => s.id === id ? { ...s, mode } : s));
+    setManagedShards(prev => prev.map(s => s.id === id ? { ...s, mode, lastAccessedAt: Date.now() } : s));
   };
 
   const handleToggleAll = (mode: ShardViewMode) => {
@@ -176,12 +296,41 @@ function App() {
   };
 
   const handleRemoveShard = (id: string) => {
+    const shardData = shardCache.get(id);
+
+    // Block removal of shards containing source or destination nodes
+    const containsSrc = shardData?.nodes.some(n => n.node_id === pathSourceId);
+    const containsDst = shardData?.nodes.some(n => n.node_id === pathTargetId);
+
+    if (containsSrc || containsDst) {
+      alert('Cannot remove shard that contains source or destination node. Clear the path first.');
+      return;
+    }
+
+    // Convert path nodes to phantom before removing
+    if (activePath && shardData) {
+      const pathNodeIds = new Set(activePath.map(n => n.node_id));
+      const pathNodesInShard = shardData.nodes.filter(n => pathNodeIds.has(n.node_id));
+
+      if (pathNodesInShard.length > 0) {
+        setActivePath(prev => {
+          if (!prev) return prev;
+          return prev.map(n => {
+            if (pathNodesInShard.some(pn => pn.node_id === n.node_id)) {
+              return { ...n, isPhantom: true, shard_id: 'removed' };
+            }
+            return n;
+          });
+        });
+      }
+    }
+
     setManagedShards(prev => prev.filter(s => s.id !== id));
-    // setShardCache(prev => { // Removed as per instructions
-    //   const next = new Map(prev);
-    //   next.delete(id);
-    //   return next;
-    // });
+    setShardCache(prev => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
   };
 
   const handleHighlightShard = () => {
@@ -198,6 +347,11 @@ function App() {
       console.log('Clicked Node:', node);
       setSelectedNode(node);
       graphRef.current?.focusNode(node.node_id);
+      // Update LRU for the shard containing this node
+      const shardId = node.shard_id;
+      if (shardId && shardId !== 'unknown' && shardId !== 'evicted') {
+        touchShard(shardId);
+      }
     } else {
       setSelectedNode(null);
     }
@@ -233,6 +387,7 @@ function App() {
             graphRef.current?.focusNode(searchId);
             const loadedNode = shardCache.get(shardId)?.nodes.find(n => n.node_id === searchId);
             if (loadedNode) setSelectedNode(loadedNode);
+            touchShard(shardId);
           }, 100);
           return;
         }
@@ -262,32 +417,66 @@ function App() {
   };
 
   const handleFindPath = async () => {
-    if (!pathSourceId || !pathTargetId || !providerRef.current) return;
+    if (!pathSourceId || !pathTargetId || !providerRef.current || !servingLayerClientRef.current) return;
     setIsPathLoading(true);
     try {
-      const path = await providerRef.current.findPath(pathSourceId, pathTargetId);
-      setActivePath(path);
+      console.log('Finding path from', pathSourceId, 'to', pathTargetId);
 
-      // Auto-unhide shards involved in path
-      const involvedShardIds = new Set(path.map(n => n.shard_id));
+      // 1. Resolve shard IDs for source and target
+      console.log('Resolving shard IDs...');
+      const srcShard = await providerRef.current.getNodeShard(pathSourceId);
+      const dstShard = await providerRef.current.getNodeShard(pathTargetId);
+      console.log('Resolved shards:', srcShard, dstShard);
 
-      // 1. Trigger add for missing shards
-      involvedShardIds.forEach(sid => {
-        const isManaged = managedShards.some(s => s.id === sid);
-        if (!isManaged) {
-          handleAddShard(sid, 'PATH');
+      if (!srcShard || !dstShard) {
+        alert('Could not resolve shard for source or target node');
+        setIsPathLoading(false);
+        return;
+      }
+
+      // 2. Call serving layer routing
+      console.log('Calling serving layer:', appSettings.servingLayerUrl);
+      const response = await servingLayerClientRef.current.findRoute(
+        pathSourceId,
+        srcShard,
+        pathTargetId,
+        dstShard
+      );
+      console.log('Serving layer response:', response);
+
+      if (response.status !== 'success' || response.path.length === 0) {
+        alert('No path found');
+        setActivePath(null);
+        return;
+      }
+
+      // 3. Build path with phantom nodes for nodes not in loaded shards
+      const path: NodeLocation[] = response.path.map((nodeId, idx) => {
+        const nodeIdStr = nodeId.toString();
+        // Check if node exists in any loaded shard
+        for (const [_shardId, shardData] of shardCache.entries()) {
+          const known = shardData.nodes.find(n => n.node_id === nodeIdStr);
+          if (known) return known;
         }
+        // Node not in loaded shards - create phantom node
+        const coord = response.coordinates[idx];
+        return {
+          node_id: nodeIdStr,
+          shard_id: 'unknown',
+          x: coord?.lng ?? 0,  // x = longitude
+          y: coord?.lat ?? 0,  // y = latitude
+          type: NodeType.INTERNAL,
+          isPhantom: true
+        };
       });
 
-      // 2. Switch hidden shards to PATH mode
-      setManagedShards(prev => prev.map(s => {
-        if (involvedShardIds.has(s.id) && s.mode === 'NONE') {
-          return { ...s, mode: 'PATH' };
-        }
-        return s;
-      }));
+      setActivePath(path);
+
+      // Path no longer auto-unhides shards - paths are always drawn via activePath
+      // Users can manually toggle shard visibility if they want to see non-path nodes
 
     } catch (e) {
+      console.error('Path finding error:', e);
       alert('Error finding path: ' + e);
       setActivePath(null);
     } finally {
@@ -304,32 +493,70 @@ function App() {
     setActiveRegion(region);
   };
 
-  // Point+Click map handler
-  const handleMapClick = (latlng: L.LatLng) => {
-    if (!isPointClickMode) return;
+  // Point+Click map handler (for both add shard and find node modes)
+  const handleMapClick = async (latlng: L.LatLng) => {
+    if (isPointClickMode) {
+      // Add shard at click location
+      const s2CellId = getS2CellId(latlng.lat, latlng.lng, appSettings.s2CellLevel);
+      handleAddShard(s2CellId, 'HIDDEN');
+      setIsPointClickMode(false);
+      return;
+    }
 
-    // Calculate S2 cell ID using configured level
-    const s2CellId = getS2CellId(latlng.lat, latlng.lng, appSettings.s2CellLevel);
+    if (isFindNodeMode) {
+      // Find nearest node at click location
+      const s2CellId = getS2CellId(latlng.lat, latlng.lng, appSettings.s2CellLevel);
 
-    // Add the shard using existing logic
-    handleAddShard(s2CellId, 'ALL');
+      // Ensure shard is loaded
+      let shardData = shardCache.get(s2CellId);
+      if (!shardData) {
+        const success = await handleAddShard(s2CellId, 'HIDDEN');
+        if (!success) {
+          alert('Could not load shard for this location');
+          setIsFindNodeMode(false);
+          return;
+        }
+        // Wait for cache update
+        await new Promise(resolve => setTimeout(resolve, 300));
+        shardData = shardCache.get(s2CellId);
+      }
 
-    // Exit point+click mode after adding
-    setIsPointClickMode(false);
+      // Find nearest node
+      if (shardData) {
+        let nearestNode: NodeLocation | null = null;
+        let minDist = Infinity;
+        shardData.nodes.forEach(n => {
+          const dist = Math.hypot(n.y - latlng.lat, n.x - latlng.lng);
+          if (dist < minDist) {
+            minDist = dist;
+            nearestNode = n;
+          }
+        });
+
+        if (nearestNode !== null) {
+          setSelectedNode(nearestNode);
+          graphRef.current?.focusNode((nearestNode as NodeLocation).node_id);
+          touchShard(s2CellId);
+        }
+      }
+
+      setIsFindNodeMode(false);
+    }
   };
 
   if (!activeRegion) {
     return <StartupModal onSelectRegion={handleSelectRegion} />;
   }
 
-  const centerLat = (activeRegion.bounds.minLat + activeRegion.bounds.maxLat) / 2;
-  const centerLon = (activeRegion.bounds.minLon + activeRegion.bounds.maxLon) / 2;
+  const regionBounds = L.latLngBounds(
+    [activeRegion.bounds.minLat, activeRegion.bounds.minLon],
+    [activeRegion.bounds.maxLat, activeRegion.bounds.maxLon]
+  );
 
   return (
     <div className="App" style={{ width: '100vw', height: '100vh', display: 'flex' }}>
       <MapContainer
-        center={[centerLat, centerLon]}
-        zoom={13}
+        bounds={regionBounds}
         style={{ width: '100%', height: '100%' }}
       >
         <TileLayer
@@ -349,6 +576,8 @@ function App() {
           pathTargetId={pathTargetId}
           onMapClick={handleMapClick}
           isPointClickMode={isPointClickMode}
+          isFindNodeMode={isFindNodeMode}
+          activePath={activePath ?? undefined}
         />
 
         {/* UI Overlay Controls - We need them ON TOP of the map */}
@@ -441,6 +670,17 @@ function App() {
                   style={{ background: '#444', color: 'white', border: '1px solid #666', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer' }}
                 >
                   Search
+                </button>
+                <button
+                  onClick={() => setIsFindNodeMode(prev => !prev)}
+                  title={isFindNodeMode ? "Cancel point+find" : "Click on map to find nearest node"}
+                  style={{
+                    background: isFindNodeMode ? '#ff9800' : '#444',
+                    border: isFindNodeMode ? '2px solid #ffb74d' : '1px solid #666',
+                    color: 'white', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer'
+                  }}
+                >
+                  📍
                 </button>
               </div>
 

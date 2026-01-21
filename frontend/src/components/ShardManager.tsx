@@ -1,10 +1,11 @@
 import React, { useState, useRef } from 'react';
 
-export type ShardViewMode = 'ALL' | 'PATH' | 'NONE';
+export type ShardViewMode = 'ALL' | 'BOUNDARIES' | 'HIDDEN';
 
 export interface ShardControlItem {
     id: string;
     mode: ShardViewMode;
+    lastAccessedAt: number;  // timestamp for LRU eviction
 }
 
 interface ShardManagerProps {
@@ -134,16 +135,18 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
             {shards.length > 0 && (
                 <div style={{ padding: '8px 10px', display: 'flex', gap: '6px', borderBottom: '1px solid #333' }}>
                     <button
-                        onClick={() => onToggleAll('ALL')}
+                        onClick={() => onToggleAll('BOUNDARIES')}
+                        title="Show boundary nodes only"
                         style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
                     >
-                        👁️ Show
+                        🔴
                     </button>
                     <button
-                        onClick={() => onToggleAll('NONE')}
+                        onClick={() => onToggleAll('HIDDEN')}
+                        title="Hide all nodes"
                         style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
                     >
-                        🚫 Hide
+                        🚫
                     </button>
                     <button
                         onClick={() => {
@@ -153,7 +156,7 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                         title="Copy all shard IDs to clipboard"
                         style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
                     >
-                        📋 Copy
+                        📋
                     </button>
                 </div>
             )}
@@ -238,18 +241,19 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                             background: '#333',
                             padding: '6px 8px',
                             borderRadius: '4px',
-                            borderLeft: shard.mode === 'ALL' ? '3px solid #00ff88' : (shard.mode === 'PATH' ? '3px solid #0088cc' : '3px solid #666'),
-                            opacity: shard.mode !== 'NONE' ? 1 : 0.6
+                            borderLeft: shard.mode === 'BOUNDARIES' ? '3px solid #ff5252' : '3px solid #666',
+                            opacity: shard.mode !== 'HIDDEN' ? 1 : 0.6
                         }}
                     >
                         <span>ID: {shard.id}</span>
                         <div style={{ display: 'flex', gap: '4px' }}>
                             <button
                                 onClick={() => {
-                                    const next = shard.mode === 'ALL' ? 'NONE' : 'ALL';
-                                    onToggleShard(shard.id, next);
+                                    // Toggle: HIDDEN <-> BOUNDARIES only
+                                    const nextMode = shard.mode === 'HIDDEN' ? 'BOUNDARIES' : 'HIDDEN';
+                                    onToggleShard(shard.id, nextMode);
                                 }}
-                                title={shard.mode === 'ALL' ? "Hide" : "Show"}
+                                title={`Mode: ${shard.mode} (click to toggle)`}
                                 style={{
                                     background: 'transparent',
                                     border: 'none',
@@ -258,7 +262,7 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                                     fontSize: '14px'
                                 }}
                             >
-                                {shard.mode === 'ALL' ? '👁️' : (shard.mode === 'PATH' ? '🛤️' : '🚫')}
+                                {shard.mode === 'BOUNDARIES' ? '🔴' : '🚫'}
                             </button>
                             <button
                                 onClick={() => onRemoveShard(shard.id)}

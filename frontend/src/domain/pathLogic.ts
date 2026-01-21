@@ -57,9 +57,9 @@ function processSegment(
 ) {
     if (segment.length < 1) return;
     const shardId = segment[0].shard_id;
-    const shardMode = shards.find(s => s.id === shardId)?.mode || 'NONE';
+    const shardMode = shards.find(s => s.id === shardId)?.mode || 'HIDDEN';
 
-    if (shardMode === 'NONE') {
+    if (shardMode === 'HIDDEN') {
         // Contraction: Shortcut from First to Last (if different)
         const start = segment[0];
         const end = segment[segment.length - 1];
@@ -76,7 +76,7 @@ function processSegment(
             });
         }
     } else {
-        // Visible (ALL or PATH): Show full detail
+        // Visible (ALL or BOUNDARIES): Show full detail
         for (let i = 0; i < segment.length - 1; i++) {
             pathEdges.push({
                 from_node_id: segment[i].node_id,

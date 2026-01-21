@@ -16,18 +16,22 @@ interface GraphRendererProps {
     pathTargetId?: string | null;
     onMapClick?: (latlng: L.LatLng) => void;
     isPointClickMode?: boolean;
+    isFindNodeMode?: boolean;
+    /** Active path for phantom node detection */
+    activePath?: NodeLocation[];
 }
 
 export interface GraphRendererHandle {
     resetView: () => void;
     focusNode: (nodeId: string) => void;
     fitToNodes: (nodesToFit: NodeLocation[]) => void;
+    fitToBounds: (bounds: L.LatLngBounds) => void;
 }
 
 // Internal component to handle Map events and Drawing
 export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRendererProps>(({
     nodes, intraEdges, overlayEdges, onNodeClick, selectedNodeId, pathEdges, pathNodes,
-    pathSourceId, pathTargetId, onMapClick, isPointClickMode
+    pathSourceId, pathTargetId, onMapClick, isPointClickMode, isFindNodeMode, activePath
 }, ref) => {
     const map = useMap();
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -45,7 +49,10 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
                 map.flyTo([node.y, node.x], 15); // y=Lat, x=Lon
             }
         },
-        fitToNodes: (nodesToFit: NodeLocation[]) => fitToNodesInternal(nodesToFit)
+        fitToNodes: (nodesToFit: NodeLocation[]) => fitToNodesInternal(nodesToFit),
+        fitToBounds: (bounds: L.LatLngBounds) => {
+            map.fitBounds(bounds, { padding: [50, 50] });
+        }
     }));
 
     const fitToNodesInternal = (nodesToFit: NodeLocation[]) => {
@@ -85,13 +92,26 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
         const nodeMap = new Map<string, NodeLocation>();
         const projectedNodes = new Map<string, L.Point>();
 
-        // 1. Cache projected positions to avoid repeating projection logic
-        // Only project nodes that are essentially visible or needed?
-        // For now project all. Optim optimization: cull.
+        // 1. Cache projected positions for regular nodes
         nodes.forEach(n => {
             nodeMap.set(n.node_id, n);
             projectedNodes.set(n.node_id, project(n.x, n.y));
         });
+
+        // 1b. Also project phantom nodes from activePath
+        const phantomNodes: NodeLocation[] = [];
+        if (activePath) {
+            activePath.forEach(n => {
+                if (n.isPhantom && !nodeMap.has(n.node_id)) {
+                    nodeMap.set(n.node_id, n);
+                    projectedNodes.set(n.node_id, project(n.x, n.y));
+                    phantomNodes.push(n);
+                }
+            });
+        }
+
+        // Combined nodes for rendering
+        const allNodes = [...nodes, ...phantomNodes];
 
         // 2. Draw Edges
         const drawEdge = (e: Edge, color: string, width: number, dashed: boolean = false) => {
@@ -155,8 +175,8 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
             ctx.shadowBlur = 0;
         }
 
-        // 3. Draw Nodes
-        nodes.forEach(n => {
+        // 3. Draw Nodes (including phantom nodes)
+        allNodes.forEach(n => {
             const p = projectedNodes.get(n.node_id);
             if (!p) return;
 
@@ -164,6 +184,7 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
             const isPathNode = pathNodes?.has(n.node_id);
             const isSource = pathSourceId === n.node_id;
             const isTarget = pathTargetId === n.node_id;
+            const isPhantom = n.isPhantom === true;
 
             let radius = 4;
             let color = '#2979FF'; // Vibrant Blue
@@ -174,9 +195,15 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
             }
 
             if (isPathNode) {
-                color = '#FFEB3B'; // Yellow
-                radius = 6;
-                if (n.type === NodeType.BOUNDARY) radius = 8;
+                if (isPhantom) {
+                    // Phantom path nodes: muted yellow, smaller
+                    color = 'rgba(255, 235, 59, 0.5)';
+                    radius = 5;
+                } else {
+                    color = '#FFEB3B'; // Solid Yellow
+                    radius = 6;
+                    if (n.type === NodeType.BOUNDARY) radius = 8;
+                }
             }
 
             // Source node: Blue with glow
@@ -221,6 +248,15 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
                 ctx.lineWidth = 1;
                 ctx.stroke();
             }
+
+            // Phantom nodes: dashed ring
+            if (isPhantom && isPathNode) {
+                ctx.setLineDash([2, 2]);
+                ctx.strokeStyle = 'rgba(255, 235, 59, 0.8)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
         });
     };
 
@@ -233,7 +269,7 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
 
     useEffect(() => {
         resizeCanvas();
-    }, [nodes, intraEdges, overlayEdges, pathEdges, selectedNodeId, pathNodes]); // redraw on data change
+    }, [nodes, intraEdges, overlayEdges, pathEdges, selectedNodeId, pathNodes, activePath]); // redraw on data change
 
     // Click Handling
     useEffect(() => {
@@ -264,8 +300,8 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
             // If a node was found, handle node click
             if (closest) {
                 onNodeClick?.(closest);
-            } else if (isPointClickMode && onMapClick) {
-                // No node found and in point+click mode: trigger map click
+            } else if ((isPointClickMode || isFindNodeMode) && onMapClick) {
+                // No node found and in point+click or find node mode: trigger map click
                 const latlng = map.containerPointToLatLng(L.point(clickX, clickY));
                 onMapClick(latlng);
             } else {
@@ -276,7 +312,7 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
 
         canvas.addEventListener('click', handleClick);
         return () => canvas.removeEventListener('click', handleClick);
-    }, [nodes, onNodeClick, onMapClick, isPointClickMode, map]);
+    }, [nodes, onNodeClick, onMapClick, isPointClickMode, isFindNodeMode, map]);
 
     return (
         <canvas
@@ -287,7 +323,7 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
                 left: 0,
                 zIndex: 500, // Above map tiles, below UI controls? Leaflet z-indexes: Pane 400.
                 pointerEvents: 'auto',
-                cursor: isPointClickMode ? 'crosshair' : 'default'
+                cursor: (isPointClickMode || isFindNodeMode) ? 'crosshair' : 'default'
             }}
         />
     );

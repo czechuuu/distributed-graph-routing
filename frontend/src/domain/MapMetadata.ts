@@ -22,6 +22,26 @@ export const PREDEFINED_REGIONS: Region[] = [
             minLon: 14.4800,
             maxLon: 14.6500
         }
+    },
+    {
+        id: 'warsaw',
+        name: 'Warsaw, Poland',
+        bounds: {
+            minLat: 52.10,
+            maxLat: 52.40,
+            minLon: 20.80,
+            maxLon: 21.20
+        }
+    },
+    {
+        id: 'poland',
+        name: 'Poland',
+        bounds: {
+            minLat: 49.00,
+            maxLat: 54.85,
+            minLon: 14.10,
+            maxLon: 24.20
+        }
     }
 ];
 
