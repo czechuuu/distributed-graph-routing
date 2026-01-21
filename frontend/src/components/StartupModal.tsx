@@ -213,6 +213,37 @@ export const StartupModal: React.FC<StartupModalProps> = ({ onSelectRegion }) =>
                                     }}
                                 />
                             </div>
+
+                            {/* Max Shards */}
+                            <div style={{ marginTop: '16px' }}>
+                                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', fontSize: '0.9rem' }}>
+                                    Max Loaded Shards (LRU limit)
+                                </label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={50}
+                                    value={settings.maxShards}
+                                    onChange={e => {
+                                        const val = parseInt(e.target.value, 10);
+                                        if (!isNaN(val) && val >= 1 && val <= 50) {
+                                            updateSetting('maxShards', val);
+                                        }
+                                    }}
+                                    style={{
+                                        width: '80px',
+                                        padding: '10px 12px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #555',
+                                        background: 'rgba(255,255,255,0.1)',
+                                        color: 'white',
+                                        fontSize: '0.95rem'
+                                    }}
+                                />
+                                <span style={{ marginLeft: '12px', color: '#888', fontSize: '0.85rem' }}>
+                                    (older shards auto-evicted)
+                                </span>
+                            </div>
                         </div>
                     )}
                 </div>

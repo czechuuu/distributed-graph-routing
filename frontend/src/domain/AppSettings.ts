@@ -11,6 +11,8 @@ export interface AppSettings {
     s2CellLevel: number;
     /** Serving layer server URL for routing (e.g. http://localhost:8001) */
     servingLayerUrl: string;
+    /** Maximum number of shards to keep in memory (LRU eviction) */
+    maxShards: number;
 }
 
 /** Default settings - remote server on localhost */
@@ -18,5 +20,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
     useRemote: true,
     dataDomainUrl: 'http://localhost:8000',
     s2CellLevel: 12,
-    servingLayerUrl: 'http://localhost:8001'
+    servingLayerUrl: 'http://localhost:8001',
+    maxShards: 4
 };

@@ -9,6 +9,10 @@ describe('computeContraction', () => {
         node_id: id, shard_id: shard, x: 0, y: 0, type: NodeType.INTERNAL
     });
 
+    const makeShard = (id: string, mode: 'ALL' | 'BOUNDARIES' | 'HIDDEN'): ShardControlItem => ({
+        id, mode, lastAccessedAt: Date.now()
+    });
+
     test('should return empty for null/empty path', () => {
         expect(computeContraction(null, []).pathEdges).toEqual([]);
         expect(computeContraction([], []).pathEdges).toEqual([]);
@@ -16,10 +20,10 @@ describe('computeContraction', () => {
 
     test('should contract hidden shard segment', () => {
         // Path: A(S1) -> B(S1) -> C(S1)
-        // S1 is NONE (Hidden)
+        // S1 is HIDDEN
         // Expected: Edge A->C only.
         const path = [makeNode('A', 'S1'), makeNode('B', 'S1'), makeNode('C', 'S1')];
-        const shards: ShardControlItem[] = [{ id: 'S1', mode: 'NONE' }];
+        const shards: ShardControlItem[] = [makeShard('S1', 'HIDDEN')];
 
         const result = computeContraction(path, shards);
         expect(result.pathEdges).toHaveLength(1);
@@ -34,7 +38,7 @@ describe('computeContraction', () => {
         // S1 is ALL
         // Expected: A->B, B->C
         const path = [makeNode('A', 'S1'), makeNode('B', 'S1'), makeNode('C', 'S1')];
-        const shards: ShardControlItem[] = [{ id: 'S1', mode: 'ALL' }];
+        const shards: ShardControlItem[] = [makeShard('S1', 'ALL')];
 
         const result = computeContraction(path, shards);
         expect(result.pathEdges).toHaveLength(2);
@@ -43,15 +47,15 @@ describe('computeContraction', () => {
 
     test('should handle cross-shard paths', () => {
         // Path: A(S1) -> B(S1) -> C(S2) -> D(S2)
-        // S1 NONE, S2 ALL
+        // S1 HIDDEN, S2 ALL
         // Expected: A->B (Contracted S1), B->C (Bridge), C->D (Full S2)
         const path = [
             makeNode('A', 'S1'), makeNode('B', 'S1'),
             makeNode('C', 'S2'), makeNode('D', 'S2')
         ];
         const shards: ShardControlItem[] = [
-            { id: 'S1', mode: 'NONE' },
-            { id: 'S2', mode: 'ALL' }
+            makeShard('S1', 'HIDDEN'),
+            makeShard('S2', 'ALL')
         ];
 
         const result = computeContraction(path, shards);

@@ -16,6 +16,7 @@ interface GraphRendererProps {
     pathTargetId?: string | null;
     onMapClick?: (latlng: L.LatLng) => void;
     isPointClickMode?: boolean;
+    isFindNodeMode?: boolean;
     /** Active path for phantom node detection */
     activePath?: NodeLocation[];
 }
@@ -24,12 +25,13 @@ export interface GraphRendererHandle {
     resetView: () => void;
     focusNode: (nodeId: string) => void;
     fitToNodes: (nodesToFit: NodeLocation[]) => void;
+    fitToBounds: (bounds: L.LatLngBounds) => void;
 }
 
 // Internal component to handle Map events and Drawing
 export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRendererProps>(({
     nodes, intraEdges, overlayEdges, onNodeClick, selectedNodeId, pathEdges, pathNodes,
-    pathSourceId, pathTargetId, onMapClick, isPointClickMode, activePath
+    pathSourceId, pathTargetId, onMapClick, isPointClickMode, isFindNodeMode, activePath
 }, ref) => {
     const map = useMap();
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -47,7 +49,10 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
                 map.flyTo([node.y, node.x], 15); // y=Lat, x=Lon
             }
         },
-        fitToNodes: (nodesToFit: NodeLocation[]) => fitToNodesInternal(nodesToFit)
+        fitToNodes: (nodesToFit: NodeLocation[]) => fitToNodesInternal(nodesToFit),
+        fitToBounds: (bounds: L.LatLngBounds) => {
+            map.fitBounds(bounds, { padding: [50, 50] });
+        }
     }));
 
     const fitToNodesInternal = (nodesToFit: NodeLocation[]) => {
@@ -295,8 +300,8 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
             // If a node was found, handle node click
             if (closest) {
                 onNodeClick?.(closest);
-            } else if (isPointClickMode && onMapClick) {
-                // No node found and in point+click mode: trigger map click
+            } else if ((isPointClickMode || isFindNodeMode) && onMapClick) {
+                // No node found and in point+click or find node mode: trigger map click
                 const latlng = map.containerPointToLatLng(L.point(clickX, clickY));
                 onMapClick(latlng);
             } else {
@@ -307,7 +312,7 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
 
         canvas.addEventListener('click', handleClick);
         return () => canvas.removeEventListener('click', handleClick);
-    }, [nodes, onNodeClick, onMapClick, isPointClickMode, map]);
+    }, [nodes, onNodeClick, onMapClick, isPointClickMode, isFindNodeMode, map]);
 
     return (
         <canvas
@@ -318,7 +323,7 @@ export const GraphRenderer = React.forwardRef<GraphRendererHandle, GraphRenderer
                 left: 0,
                 zIndex: 500, // Above map tiles, below UI controls? Leaflet z-indexes: Pane 400.
                 pointerEvents: 'auto',
-                cursor: isPointClickMode ? 'crosshair' : 'default'
+                cursor: (isPointClickMode || isFindNodeMode) ? 'crosshair' : 'default'
             }}
         />
     );
