@@ -34,10 +34,21 @@ export class RemoteGraphProvider implements GraphProvider {
             bidirectional: e.bidirectional || false
         });
 
-        return {
-            bridges: (data.bridges || []).map(mapEdge),
-            shortcuts: (data.shortcuts || []).map(mapEdge)
-        };
+        const bridges = (data.bridges || []).map(mapEdge);
+        const shortcuts = (data.shortcuts || []).map(mapEdge);
+
+        // Log overlay graph stats
+        const allNodeIds = new Set<string>();
+        bridges.forEach(e => { allNodeIds.add(e.from_node_id); allNodeIds.add(e.to_node_id); });
+        shortcuts.forEach(e => { allNodeIds.add(e.from_node_id); allNodeIds.add(e.to_node_id); });
+
+        console.log(`📊 Overlay Graph Stats:`);
+        console.log(`   Bridge edges: ${bridges.length}`);
+        console.log(`   Shortcut edges: ${shortcuts.length}`);
+        console.log(`   Total edges: ${bridges.length + shortcuts.length}`);
+        console.log(`   Unique nodes (boundary): ${allNodeIds.size}`);
+
+        return { bridges, shortcuts };
     }
 
     async getShard(shardId: string): Promise<ShardData> {

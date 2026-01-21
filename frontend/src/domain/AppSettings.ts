@@ -19,7 +19,7 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
     useRemote: true,
     dataDomainUrl: 'http://localhost:8000',
-    s2CellLevel: 12,
+    s2CellLevel: 9,
     servingLayerUrl: 'http://localhost:8001',
     maxShards: 4
 };

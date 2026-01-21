@@ -135,13 +135,6 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
             {shards.length > 0 && (
                 <div style={{ padding: '8px 10px', display: 'flex', gap: '6px', borderBottom: '1px solid #333' }}>
                     <button
-                        onClick={() => onToggleAll('ALL')}
-                        title="Show all nodes"
-                        style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
-                    >
-                        👁️
-                    </button>
-                    <button
                         onClick={() => onToggleAll('BOUNDARIES')}
                         title="Show boundary nodes only"
                         style={{ flex: 1, background: '#444', border: 'none', color: 'white', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontSize: '12px' }}
@@ -248,7 +241,7 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                             background: '#333',
                             padding: '6px 8px',
                             borderRadius: '4px',
-                            borderLeft: shard.mode === 'ALL' ? '3px solid #00ff88' : (shard.mode === 'BOUNDARIES' ? '3px solid #ff5252' : '3px solid #666'),
+                            borderLeft: shard.mode === 'BOUNDARIES' ? '3px solid #ff5252' : '3px solid #666',
                             opacity: shard.mode !== 'HIDDEN' ? 1 : 0.6
                         }}
                     >
@@ -256,13 +249,11 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                         <div style={{ display: 'flex', gap: '4px' }}>
                             <button
                                 onClick={() => {
-                                    // Cycle: HIDDEN -> BOUNDARIES -> ALL -> HIDDEN
-                                    const nextMode = shard.mode === 'HIDDEN' ? 'BOUNDARIES'
-                                        : shard.mode === 'BOUNDARIES' ? 'ALL'
-                                            : 'HIDDEN';
+                                    // Toggle: HIDDEN <-> BOUNDARIES only
+                                    const nextMode = shard.mode === 'HIDDEN' ? 'BOUNDARIES' : 'HIDDEN';
                                     onToggleShard(shard.id, nextMode);
                                 }}
-                                title={`Mode: ${shard.mode} (click to cycle)`}
+                                title={`Mode: ${shard.mode} (click to toggle)`}
                                 style={{
                                     background: 'transparent',
                                     border: 'none',
@@ -271,7 +262,7 @@ export const ShardManager: React.FC<ShardManagerProps> = ({
                                     fontSize: '14px'
                                 }}
                             >
-                                {shard.mode === 'ALL' ? '👁️' : (shard.mode === 'BOUNDARIES' ? '🔴' : '🚫')}
+                                {shard.mode === 'BOUNDARIES' ? '🔴' : '🚫'}
                             </button>
                             <button
                                 onClick={() => onRemoveShard(shard.id)}

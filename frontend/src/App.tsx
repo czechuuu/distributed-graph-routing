@@ -158,6 +158,21 @@ function App() {
       });
     }
 
+    // ALWAYS add src/dest nodes (even when their shard is hidden and they're not selected)
+    [pathSourceId, pathTargetId].forEach(nodeId => {
+      if (!nodeId) return;
+      if (nodes.find(n => n.node_id === nodeId)) return; // already added
+
+      // Find the node in any loaded shard
+      for (const [_shardId, data] of shardCache.entries()) {
+        const node = data.nodes.find(n => n.node_id === nodeId);
+        if (node) {
+          nodes.push(node);
+          break;
+        }
+      }
+    });
+
     // Overlay edges filtering
     const validNodeIds = new Set(nodes.map(n => n.node_id));
     const filterOverlay = (edges: Edge[]) => edges.filter(e =>
@@ -171,7 +186,7 @@ function App() {
       pathEdges: pathEdgesList,
       pathNodesSet: pathNodeIds
     };
-  }, [managedShards, shardCache, overlayGraph, activePath, selectedNode]);
+  }, [managedShards, shardCache, overlayGraph, activePath, selectedNode, pathSourceId, pathTargetId]);
 
 
 
