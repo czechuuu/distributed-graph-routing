@@ -1,6 +1,7 @@
 import logging
 import networkx as nx
 from typing import Dict, List, Tuple
+import concurrent.futures
 
 logger = logging.getLogger("GraphFacade")
 
@@ -139,6 +140,71 @@ class GraphFacade:
                         
         except Exception as e:
             logger.error(f"Error in prefetch_coords: {e}")
+
+    def get_expansions_batch(self, edges: List[Tuple[int, int]]) -> Dict[Tuple[int, int], List[int]]:
+        """
+        Fetches expansion paths for a batch of shortcuts.
+        Checks cache first, then fetches missing ones from Bigtable in parallel chunks.
+        """
+        results = {}
+        missing_edges = []
+
+        # Check cache
+        for u, v in edges:
+            if (u, v) in self.shortcut_cache:
+                results[(u, v)] = self.shortcut_cache[(u, v)]
+            else:
+                missing_edges.append((u, v))
+
+        if not missing_edges:
+            return results
+
+        if self.use_mock:
+            return results
+
+        chunk_size = 1000
+        chunks = [missing_edges[i:i + chunk_size] for i in range(0, len(missing_edges), chunk_size)]
+        
+        def fetch_chunk(chunk):
+            chunk_results = {}
+            try:
+                row_set = RowSet()
+                for u, v in chunk:
+                    row_key = f"P#{u}#{v}".encode('utf-8')
+                    row_set.add_row_key(row_key)
+                
+                rows = self.shortcuts_table.read_rows(row_set=row_set)
+                
+                for row in rows:
+                    key = row.row_key.decode('utf-8')
+                    parts = key.split('#')
+                    if len(parts) == 3:
+                        u, v = int(parts[1]), int(parts[2])
+                        
+                        cell = row.cells.get('cf', {}).get(b'val', [])
+                        if cell:
+                            path_proto = bigtable_storage_pb2.ShortcutPath()
+                            path_proto.ParseFromString(cell[0].value)
+                            path = list(path_proto.nodes)
+                            chunk_results[(u, v)] = path
+            except Exception as e:
+                logger.warning(f"Failed to fetch chunk: {e}")
+            return chunk_results
+
+        logger.info(f"Fetching {len(missing_edges)} shortcuts in {len(chunks)} parallel chunks...")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_chunk = {executor.submit(fetch_chunk, chunk): chunk for chunk in chunks}
+            for future in concurrent.futures.as_completed(future_to_chunk):
+                try:
+                    chunk_data = future.result()
+                    for k, v in chunk_data.items():
+                        self.shortcut_cache[k] = v
+                        results[k] = v
+                except Exception as e:
+                    logger.error(f"Chunk fetch failed: {e}")
+            
+        return results
 
     def get_expansion(self, u: int, v: int) -> List[int]:
         """
