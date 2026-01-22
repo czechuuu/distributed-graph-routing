@@ -6,10 +6,11 @@ This is a FastAPI service that wraps Google Cloud Bigtable access for the fronte
 - Python 3.8+
 - Google Cloud Credentials (json key) with Bigtable Reader access.
 
-## Installation
+## Installation (uv)
 
+From the repo root:
 ```bash
-pip install -r data_domain/requirements.txt
+uv sync --project data_domain
 ```
 
 ## Running the Server
@@ -24,7 +25,7 @@ pip install -r data_domain/requirements.txt
 
 2. Run the server (from the root directory):
    ```bash
-   uvicorn data_domain.main:app --reload --port 8000
+   uv run --project data_domain uvicorn data_domain.main:app --reload --port 8000
    ```
 
 ## API
