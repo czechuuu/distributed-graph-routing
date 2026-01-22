@@ -1,70 +1,83 @@
 
-import networkx as nx
-from typing import List, Tuple, Set
+from typing import List, Tuple, Set, Dict, Any
 from .model import Node, Edge, Shortcut
 
-def build_shard_graph(nodes: List[Node], edges: List[Edge]) -> nx.DiGraph:
-    """Builds a NetworkX DiGraph for the shard."""
-    G = nx.DiGraph()
-    for n in nodes:
-        G.add_node(n.id, x=n.x, y=n.y, shard_id=n.shard_id)
+
+def build_shard_graph(nodes: List[Node], edges: List[Edge]) -> Tuple[Any, Dict[int, int], List[int]]:
+    """
+    Builds an igraph Graph for the shard from internal nodes and edges only.
     
+    Returns:
+        - G: the igraph Graph
+        - id_to_idx: mapping from node_id to igraph vertex index
+        - idx_to_id: list mapping igraph vertex index to node_id
+    """
+    # Lazy import - only load igraph when actually running on Dataflow workers
+    import igraph as ig
+    
+    # Build node ID mappings
+    node_ids = [n.id for n in nodes]
+    id_to_idx = {nid: i for i, nid in enumerate(node_ids)}
+    idx_to_id = node_ids
+    
+    # Create graph
+    G = ig.Graph(n=len(node_ids), directed=True)
+    G.vs['node_id'] = node_ids
+    
+    # Add edges - all internal edges should have both endpoints in the shard
+    edge_tuples = []
+    weights = []
     for e in edges:
-        G.add_edge(e.u, e.v, weight=e.weight)
-    return G
-
-def identify_boundary_nodes(graph: nx.DiGraph, current_shard_id: int) -> Tuple[Set[int], Set[int]]:
-    """
-    Identifies in-boundary and out-boundary nodes based on graph structure.
+        edge_tuples.append((id_to_idx[e.u], id_to_idx[e.v]))
+        weights.append(e.weight)
     
-    in-boundary: node IN this shard having an incoming edge FROM a different shard
-    out-boundary: node IN this shard having an outgoing edge TO a different shard
+    if edge_tuples:
+        G.add_edges(edge_tuples)
+        G.es['weight'] = weights
+    
+    return G, id_to_idx, idx_to_id
+
+
+def compute_shortcuts(graph: Any, id_to_idx: Dict[int, int], idx_to_id: List[int],
+                      in_nodes: Set[int], out_nodes: Set[int]) -> List[Shortcut]:
     """
-    in_boundary = set()
-    out_boundary = set()
-
-    for u, v in graph.edges():
-        u_data = graph.nodes.get(u, {})
-        v_data = graph.nodes.get(v, {})
-        
-        u_shard = u_data.get('shard_id')
-        v_shard = v_data.get('shard_id')
-        
-        # Check Out-Boundary: u is internal, v is external
-        if u_shard == current_shard_id and v_shard != current_shard_id:
-            out_boundary.add(u)
-            
-        # Check In-Boundary: v is internal, u is external
-        if v_shard == current_shard_id and u_shard != current_shard_id:
-            in_boundary.add(v)
-            
-    return in_boundary, out_boundary
-
-def compute_shortcuts(graph: nx.DiGraph, in_nodes: Set[int], out_nodes: Set[int]) -> List[Shortcut]:
+    Compute shortcuts between in-boundary and out-boundary nodes using Dijkstra.
+    
+    in_nodes: set of node IDs that are IN-boundary (have incoming edges from other shards)
+    out_nodes: set of node IDs that are OUT-boundary (have outgoing edges to other shards)
+    
+    All boundary nodes must exist in this shard's node set.
+    """
     shortcuts = []
     
-    for src in in_nodes:
-        if not graph.has_node(src):
-            continue
+    for src_id in in_nodes:
+        src_idx = id_to_idx[src_id]
+        
+        # Get shortest paths from source to all reachable nodes
+        paths = graph.get_shortest_paths(src_idx, weights='weight', output='vpath')
+        distances = graph.shortest_paths(source=src_idx, weights='weight')[0]
+        
+        for dst_id in out_nodes:
+            if src_id == dst_id:
+                continue
+                
+            dst_idx = id_to_idx[dst_id]
+            weight = distances[dst_idx]
             
-        try:
-            # Calculate weights and paths from src to all reachable nodes
-            weights, paths = nx.single_source_dijkstra(graph, src, weight='weight')
-            
-            for dst in out_nodes:
-                if dst in weights:
-                    if src == dst: continue
+            # Only create shortcut if path exists (not infinity)
+            if weight != float('inf'):
+                path_indices = paths[dst_idx]
+                if not path_indices:
+                    raise ValueError(f"Path is empty but distance is finite from {src_id} to {dst_id}")
                     
-                    # Create Shortcut object with full path
-                    shortcuts.append(Shortcut(
-                        u=src, 
-                        v=dst, 
-                        weight=weights[dst], 
-                        path=paths[dst] 
-                    ))
-                    
-        except Exception as e:
-            print(f"Error for {src}: {e}")
-            continue
-
+                path_node_ids = [idx_to_id[i] for i in path_indices]
+                
+                shortcuts.append(Shortcut(
+                    u=src_id,
+                    v=dst_id,
+                    weight=weight,
+                    path=path_node_ids
+                ))
+    
     return shortcuts
+

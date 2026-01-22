@@ -3,72 +3,89 @@ from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
 from google.cloud.bigtable import row
 
 from .io_wrappers import ReadNodesFromBQ, ReadEdgesFromBQ, WriteToBT
-from .algo import build_shard_graph, identify_boundary_nodes, compute_shortcuts
-
-from enum import Enum
+from .algo import build_shard_graph, compute_shortcuts
 
 from storage_types import bigtable_storage_pb2
-        
-class EmitShardsForEdge(beam.DoFn):
+
+
+class ClassifyEdges(beam.DoFn):
     """
-    Takes (edge, shard_u, shard_v)
-    Yields out (shard_id, edge)
+    Classifies edges after shard assignment.
+    
+    Input: (edge, shard_u, shard_v)
+    
+    Outputs:
+        - 'bridge': The edge itself (for overlay graph)
+        - 'internal': (shard_id, edge) for internal shard processing
+        - 'boundary': (shard_id, (node_id, 'IN' or 'OUT')) for boundary node identification
     """
-    def process(self, element, *args, **kwargs):
+    def process(self, element):
         edge, shard_u, shard_v = element
-        if shard_u is not None and shard_v is not None:
-            yield (shard_u, edge)
-            if shard_u != shard_v:
-                yield (shard_v, edge)
+        
+        if shard_u == shard_v:
+            # Internal edge - goes only to its shard
+            yield beam.pvalue.TaggedOutput('internal', (shard_u, edge))
+        else:
+            # Bridge edge - goes to overlay graph directly
+            yield beam.pvalue.TaggedOutput('bridge', edge)
+            
+            # Also emit boundary node info for each shard
+            # node u is OUT-boundary for shard_u (it has edge going OUT to another shard)
+            yield beam.pvalue.TaggedOutput('boundary', (shard_u, (edge.u, 'OUT')))
+            # node v is IN-boundary for shard_v (it has edge coming IN from another shard)  
+            yield beam.pvalue.TaggedOutput('boundary', (shard_v, (edge.v, 'IN')))
+
 
 class ProcessShard(beam.DoFn):
+    """
+    Processes a single shard to compute shortcuts.
+    
+    Input: (shard_id, {'nodes': [Node], 'edges': [Edge], 'boundary': [(node_id, 'IN'/'OUT')]})
+    
+    Outputs:
+        - 'shortcuts': (shard_id, [Shortcut])
+        - 'intra': (shard_id, [Edge], [NodeLocation])
+    """
     def process(self, element):
-        """
-        Takes a (shard_id, {'nodes': nodes, 'edges': edges}) tuple
-        Yields out tagged outputs
-        shortcut: (shard_id, shortcuts, inter_shard_edges)
-        intra: (shard_id, graph)
-        """
         shard_id, data = element
-        nodes = data['nodes']
-        edges = data['edges']
         
-        node_list = list(nodes)
-        edge_list = list(edges)
+        node_list = list(data.get('nodes', []))
+        edge_list = list(data.get('edges', []))
+        boundary_info = list(data.get('boundary', []))
+        
+        # Separate boundary nodes into IN and OUT sets
+        in_boundary = set()
+        out_boundary = set()
+        for node_id, direction in boundary_info:
+            if direction == 'IN':
+                in_boundary.add(node_id)
+            else:
+                out_boundary.add(node_id)
+        
+        # Build graph from internal nodes and edges only (no ghost nodes needed!)
+        G, id_to_idx, idx_to_id = build_shard_graph(node_list, edge_list)
+        
+        # Compute shortcuts between boundary nodes
+        shortcuts = compute_shortcuts(G, id_to_idx, idx_to_id, in_boundary, out_boundary)
+        
+        # Extract node locations
+        node_locations = []
+        for n in node_list:
+            node_locations.append({
+                'node_id': n.id,
+                'x': n.x,
+                'y': n.y
+            })
+        
+        yield beam.pvalue.TaggedOutput('shortcuts', (shard_id, shortcuts))
+        yield beam.pvalue.TaggedOutput('intra', (shard_id, edge_list, node_locations))
 
-        G = build_shard_graph(node_list, edge_list)
-        
-        in_boundary, out_boundary = identify_boundary_nodes(G, shard_id)
-        
-        shortcuts = compute_shortcuts(G, in_boundary, out_boundary)
-
-        inter_shard_edges = []
-        for edge in edge_list:
-            u_node = G.nodes.get(edge.u)
-            v_node = G.nodes.get(edge.v)
-            
-            # If a node is not in G it means it's from another shard - then we'll resolve to None here
-            # which is good because then we'll detect None != shard_id and add it to inter_shard_edges
-            shard_u = u_node.get('shard_id') if u_node else None
-            shard_v = v_node.get('shard_id') if v_node else None
-            
-            is_internal = (shard_u == shard_id) and (shard_v == shard_id)
-            
-            if not is_internal:
-                inter_shard_edges.append(edge)
-        
-        yield beam.pvalue.TaggedOutput('shortcuts', (shard_id, shortcuts, inter_shard_edges))
-        yield beam.pvalue.TaggedOutput('intra', (shard_id, G))
-
-class MutationType(Enum):
-    SHORTCUT = 1
-    INTRA = 2
 
 class CreatePathMutations(beam.DoFn):
+    """Creates BigTable rows for shortcut paths."""
     def process(self, element):
-        shard_id, shortcuts, inter_shard_edges = element
+        shard_id, shortcuts = element
         
-        # Iterate over shortcuts and save paths
         for s in shortcuts:
             if s.path:
                 path_proto = bigtable_storage_pb2.ShortcutPath()
@@ -79,50 +96,62 @@ class CreatePathMutations(beam.DoFn):
                 direct_row.set_cell('cf', 'val', path_proto.SerializeToString())
                 yield direct_row
 
-class ExtractOverlayEdges(beam.DoFn):
+
+class ExtractShortcutEdges(beam.DoFn):
+    """Extracts edge tuples from shortcuts for overlay graph."""
     def process(self, element):
-        shard_id, shortcuts, inter_shard_edges = element
-        
+        shard_id, shortcuts = element
+        for s in shortcuts:
+            # Yield as tuple: (type, from, to, weight)
+            yield ('shortcut', s.u, s.v, int(s.weight))
+
+
+class ExtractBridgeEdge(beam.DoFn):
+    """Extracts edge tuple from bridge for overlay graph."""
+    def process(self, element):
+        # element is an Edge namedtuple
+        yield ('bridge', element.u, element.v, int(element.weight))
+
+
+class MergeOverlayGraph(beam.CombineFn):
+    """Combines all overlay edge tuples into one OverlayGraph proto."""
+    def create_accumulator(self):
+        return {'shortcuts': [], 'bridges': []}
+    
+    def add_input(self, accumulator, element):
+        edge_type, from_id, to_id, weight = element
+        edge_tuple = (from_id, to_id, weight)
+        if edge_type == 'shortcut':
+            accumulator['shortcuts'].append(edge_tuple)
+        else:
+            accumulator['bridges'].append(edge_tuple)
+        return accumulator
+    
+    def merge_accumulators(self, accumulators):
+        merged = {'shortcuts': [], 'bridges': []}
+        for acc in accumulators:
+            merged['shortcuts'].extend(acc['shortcuts'])
+            merged['bridges'].extend(acc['bridges'])
+        return merged
+    
+    def extract_output(self, accumulator):
+        # Serialize
         overlay_proto = bigtable_storage_pb2.OverlayGraph()
         
-        # Add Shortcuts
-        for s in shortcuts:
-            pb_edge = overlay_proto.shortcuts.add()
-            pb_edge.from_node_id = s.u
-            pb_edge.to_node_id = s.v
-            pb_edge.weight = int(s.weight) 
+        for from_id, to_id, weight in accumulator['shortcuts']:
+            edge = overlay_proto.shortcuts.add()
+            edge.from_node_id = from_id
+            edge.to_node_id = to_id
+            edge.weight = weight
             
-        # Add Bridges
-        for e in inter_shard_edges:
-            pb_edge = overlay_proto.bridges.add()
-            pb_edge.from_node_id = e.u
-            pb_edge.to_node_id = e.v
-            pb_edge.weight = int(e.weight)
+        for from_id, to_id, weight in accumulator['bridges']:
+            edge = overlay_proto.bridges.add()
+            edge.from_node_id = from_id
+            edge.to_node_id = to_id
+            edge.weight = weight
             
-        yield overlay_proto.SerializeToString()
+        return overlay_proto.SerializeToString()
 
-class MergeOverlayGraphs(beam.CombineFn):
-    def create_accumulator(self):
-        return []
-
-    def add_input(self, accumulator, element_bytes):
-        accumulator.append(element_bytes)
-        return accumulator
-
-    def merge_accumulators(self, accumulators):
-        merged = []
-        for acc in accumulators:
-            merged.extend(acc)
-        return merged
-
-    def extract_output(self, accumulator):
-        merged_proto = bigtable_storage_pb2.OverlayGraph()
-        for b in accumulator:
-            partial = bigtable_storage_pb2.OverlayGraph()
-            partial.ParseFromString(b)
-            merged_proto.shortcuts.extend(partial.shortcuts)
-            merged_proto.bridges.extend(partial.bridges)
-        return merged_proto.SerializeToString()
 
 class CreateOverlayMutation(beam.DoFn):
     def process(self, element_bytes):
@@ -133,38 +162,32 @@ class CreateOverlayMutation(beam.DoFn):
 
 
 class CreateIntraMutations(beam.DoFn):
+    """Creates BigTable mutations for shard graphs."""
     def process(self, element):
-        shard_id, G = element
+        shard_id, edges, node_locations = element
         row_key = f"S#{shard_id}".encode('utf-8')
         direct_row = row.DirectRow(row_key)
         
         shard_proto = bigtable_storage_pb2.ShardGraph()
         
-        # Add Edges
-        for u, v, d in G.edges(data=True):
-            # Filter internal edges only
-            u_node = G.nodes[u]
-            v_node = G.nodes[v]
-            if u_node.get('shard_id') == shard_id and v_node.get('shard_id') == shard_id:
-                 pb_edge = shard_proto.edges.add()
-                 pb_edge.from_node_id = u
-                 pb_edge.to_node_id = v
-                 pb_edge.weight = int(d['weight'])
+        for edge in edges:
+            pb_edge = shard_proto.edges.add()
+            pb_edge.from_node_id = edge.u
+            pb_edge.to_node_id = edge.v
+            pb_edge.weight = int(edge.weight)
         
-        # Add Node Locations
-        for n, data in G.nodes(data=True):
-             if data.get('shard_id') == shard_id:
-                 loc = shard_proto.locations.add()
-                 loc.node_id = n
-                 loc.x = data.get('x', 0.0)
-                 loc.y = data.get('y', 0.0)
+        for loc_data in node_locations:
+            loc = shard_proto.locations.add()
+            loc.node_id = loc_data['node_id']
+            loc.x = loc_data['x']
+            loc.y = loc_data['y']
         
         direct_row.set_cell('cf', 'val', shard_proto.SerializeToString())
         yield direct_row
 
+
 class CreateNodeIndexMutation(beam.DoFn):
     def process(self, element):
-        # element is a Node object
         row_key = f"N#{element.id}".encode('utf-8')
         direct_row = row.DirectRow(row_key)
         
@@ -182,12 +205,13 @@ class CreateNodeIndexMutation(beam.DoFn):
 
         yield direct_row
 
-def create_pipeline(project, temp_location, input_nodes, input_edges, instance, shortcuts_table, shards_table, overlay_table, node_index_table, setup_file, pipeline_args=None):
+
+def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
+                    shortcuts_table, shards_table, overlay_table, node_index_table, 
+                    setup_file, pipeline_args=None):
     if pipeline_args is None:
         pipeline_args = []
 
-    # Automatically enable Cloud Build for DataflowRunner if not explicitly set
-    # This prevents installing dependencies on every worker boot, speeding up scaling.
     is_dataflow = any('DataflowRunner' in arg for arg in pipeline_args)
     if is_dataflow:
         pipeline_args.append('--prebuild_sdk_container_engine=cloud_build')
@@ -195,7 +219,6 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
         pipeline_args.append('--experiments=use_runner_v2')
         pipeline_args.append(f'--sdk_container_image=docker.io/apache/beam_python3.11_sdk:{beam.version.__version__}')
 
-    # Initialize PipelineOptions with passed args (e.g. --runner, --region) using flags argument.
     options = PipelineOptions(flags=pipeline_args)
     options.view_as(SetupOptions).save_main_session = True
     
@@ -210,27 +233,27 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
         nodes = p | "ReadNodes" >> ReadNodesFromBQ(input_nodes)
         edges = p | "ReadEdges" >> ReadEdgesFromBQ(input_edges)
         
-        # (NodeID, ShardID)
-        node_id_shard = nodes | "KeyNodesById" >> beam.Map(lambda n: (n.id, n.shard_id))
+        # === STEP 1: Attach shard IDs to edges ===
         
-        # (Edge.u, Edge)
+        node_id_shard = nodes | "KeyNodesById" >> beam.Map(lambda n: (n.id, n.shard_id))
         edges_keyed_by_u = edges | "KeyEdgesByU" >> beam.Map(lambda e: (e.u, e))
         
         def attach_shard_u(element):
-            """
-            Takes co-grouped
-            (Edge.u, {node_id_shard: [ShardID], edges_u: [Edge]}),
-            Yields (Edge.v, (Edge, ShardU))
-            """
             node_id, data = element
             shard_ids = data['node_id_shard']
             edge_list = data['edges_u']
-            if shard_ids:
-                shard_u = shard_ids[0]
-                for e in edge_list:
-                    yield (e.v, (e, shard_u))
+            
+            if not edge_list:
+                return  # No edges for this node, that's fine
+                
+            if not shard_ids:
+                raise ValueError(f"Node {node_id} referenced by edge(s) but not found in nodes table. "
+                               f"Edges: {list(edge_list)}")
+            
+            shard_u = shard_ids[0]
+            for e in edge_list:
+                yield (e.v, (e, shard_u))
 
-        # (Edge.v, (Edge, shard_u))
         edges_with_u_shard = (
             {'node_id_shard': node_id_shard, 'edges_u': edges_keyed_by_u}
             | "GroupEdgesAndNodesByU" >> beam.CoGroupByKey()
@@ -238,18 +261,20 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
         )
         
         def attach_shard_v(element):
-            """
-            Takes co-grouped
-            (Edge.v, {node_id_shard: [ShardID], edges_with_u: [(edge, shard_u)]})
-            Yields (Edge, shard_u, shard_v)
-            """
             node_id, data = element
             shard_ids = data['node_id_shard']
-            edges_data = data['edges_with_u']
-            if shard_ids:
-                shard_v = shard_ids[0]
-                for (e, shard_u) in edges_data:
-                    yield (e, shard_u, shard_v)
+            edges_data = list(data['edges_with_u'])
+            
+            if not edges_data:
+                return  # No edges targeting this node, that's fine
+                
+            if not shard_ids:
+                raise ValueError(f"Node {node_id} referenced as edge target but not found in nodes table. "
+                               f"Edges: {edges_data}")
+            
+            shard_v = shard_ids[0]
+            for (e, shard_u) in edges_data:
+                yield (e, shard_u, shard_v)
                 
         edges_with_shards = (
             {'node_id_shard': node_id_shard, 'edges_with_u': edges_with_u_shard}
@@ -257,46 +282,64 @@ def create_pipeline(project, temp_location, input_nodes, input_edges, instance, 
             | "AttachShardV" >> beam.FlatMap(attach_shard_v)
         )
         
-        # (shard_id, edge)
-        assigned_edges = (
-            edges_with_shards 
-            | beam.ParDo(EmitShardsForEdge())
+        # === STEP 2: Classify edges into bridges vs internal, extract boundary nodes ===
+        
+        classified = edges_with_shards | "ClassifyEdges" >> beam.ParDo(ClassifyEdges()).with_outputs(
+            'bridge', 'internal', 'boundary'
         )
         
-        # (shard_id, node) pairs
+        bridges = classified.bridge          # Edge objects (for overlay)
+        internal_edges = classified.internal  # (shard_id, Edge)
+        boundary_info = classified.boundary   # (shard_id, (node_id, 'IN'/'OUT'))
+        
+        # === STEP 3: Group by shard and process ===
+        
         nodes_by_shard = nodes | "KeyNodesByShardId" >> beam.Map(lambda n: (n.shard_id, n))
         
-        # (shard_id, (nodes, edges)) pairs
         grouped = (
-            {'nodes': nodes_by_shard, 'edges': assigned_edges}
-            | beam.CoGroupByKey()
+            {'nodes': nodes_by_shard, 'edges': internal_edges, 'boundary': boundary_info}
+            | "GroupByShardId" >> beam.CoGroupByKey()
         )
         
-        # yields out the 
-        # shortcut: (shard_id, shortcuts, inter_shard_edges)
-        # intra: (shard_id, graph)
-        results = grouped | beam.ParDo(ProcessShard()).with_outputs('shortcuts', 'intra')
+        shard_results = grouped | "ProcessShard" >> beam.ParDo(ProcessShard()).with_outputs(
+            'shortcuts', 'intra'
+        )
         
-        # Write Shortcut Paths
-        (results.shortcuts 
+        # === STEP 4: Write outputs ===
+        
+        # Write shortcut paths to BigTable
+        (shard_results.shortcuts
          | "CreatePathMutations" >> beam.ParDo(CreatePathMutations())
          | "WritePaths" >> WriteToBT(project, instance, shortcuts_table)
         )
         
-        # Extract, Merge and Write Overlay Graph
-        (results.shortcuts
-         | "ExtractOverlayEdges" >> beam.ParDo(ExtractOverlayEdges())
-         | "MergeOverlayGraphs" >> beam.CombineGlobally(MergeOverlayGraphs())
+        # Create overlay edges from shortcuts
+        shortcut_overlay_edges = (
+            shard_results.shortcuts
+            | "ExtractShortcutEdges" >> beam.ParDo(ExtractShortcutEdges())
+        )
+        
+        # Create overlay edges from bridges
+        bridge_overlay_edges = (
+            bridges
+            | "ExtractBridgeEdge" >> beam.ParDo(ExtractBridgeEdge())
+        )
+        
+        # Merge all overlay edges and write
+        ((shortcut_overlay_edges, bridge_overlay_edges)
+         | "FlattenOverlayEdges" >> beam.Flatten()
+         | "MergeOverlayGraph" >> beam.CombineGlobally(MergeOverlayGraph())
          | "CreateOverlayMutation" >> beam.ParDo(CreateOverlayMutation())
          | "WriteOverlay" >> WriteToBT(project, instance, overlay_table)
         )
         
-        (results.intra 
+        # Write intra-shard graphs
+        (shard_results.intra
          | "CreateIntraMutations" >> beam.ParDo(CreateIntraMutations())
          | "WriteIntra" >> WriteToBT(project, instance, shards_table)
         )
         
-        # Write Node Index
+        # Write node index
         (nodes
          | "CreateNodeIndexMutation" >> beam.ParDo(CreateNodeIndexMutation())
          | "WriteNodeIndex" >> WriteToBT(project, instance, node_index_table)

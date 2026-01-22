@@ -8,18 +8,20 @@ The **Preprocessing** subsystem is responsible for ingesting raw graph data (CSV
     *   Users upload files to a Google Cloud Storage (GCS) bucket (e.g., `raw_graph_data`):
         *   `graph_data/nodes.csv`
         *   `graph_data/edges.csv`
-    *   A **Google Cloud Function** triggers on the `google.cloud.storage.object.v1.finalized` event.
 
-2.  **Validation & Loading**:
+2.  **Triggering**:
+    *   A **Google Cloud Function** (`graph-loader-function`) is triggered manually via HTTP request to process the files.
+
+3.  **Validation & Loading**:
     *   The Cloud Function determines if the file is a valid node or edge list (must be in `graph_data/`).
     *   It effectively enforces a schema and loads the data into **BigQuery** (`graph_data.nodes` and `graph_data.edges`).
     *   It automatically calculates and updates `ShardId` for nodes based on their geospatial coordinates (S2 Cells).
+    *   **Skip Loading**: The loading step can be optionally skipped if the data is already in BigQuery.
 
-3.  **Pipeline Trigger**:
-    *   The function checks timestamps of both tables.
-    *   If both `nodes` and `edges` have been updated within a short window (**30 seconds**), it triggers the **Dataflow Pipeline**.
+4.  **Pipeline Trigger**:
+    *   After processing (or skipping), the function unconditionally triggers the **Dataflow Pipeline**.
 
-4.  **Processing (Dataflow)**:
+5.  **Processing (Dataflow)**:
     *   The pipeline runs on Google Dataflow (Apache Beam).
     *   It reads the full graph from BigQuery.
     *   It partitions the graph into shards.
@@ -28,6 +30,30 @@ The **Preprocessing** subsystem is responsible for ingesting raw graph data (CSV
         *   `shards`: Intra-shard edges and node locations.
         *   `shortcuts`: Precomputed shortcut paths for optimized routing.
         *   `overlay`: High-level graph connecting boundary nodes.
+
+## How to Trigger
+
+To trigger the preprocessing pipeline, first ensure that `graph_data/nodes.csv` and `graph_data/edges.csv` are present in the `raw_graph_data` bucket.
+
+### Standard Trigger (Load Data + Run Pipeline)
+Run the following command to load data from GCS to BigQuery and then start the Dataflow pipeline:
+
+```bash
+curl -X POST https://us-central1-repetitive-shortest-paths.cloudfunctions.net/graph-loader-function \
+-H "Authorization: bearer $(gcloud auth print-identity-token)" \
+-H "Content-Type: application/json" \
+-d '{"bucket": "raw_graph_data"}'
+```
+
+### Pipeline Only (Skip Data Loading)
+To trigger the pipeline **without** reloading data from GCS to BigQuery (e.g., for retries/debugging), add `"skip_load": true` to the JSON body:
+
+```bash
+curl -X POST https://us-central1-repetitive-shortest-paths.cloudfunctions.net/graph-loader-function \
+-H "Authorization: bearer $(gcloud auth print-identity-token)" \
+-H "Content-Type: application/json" \
+-d '{"bucket": "raw_graph_data", "skip_load": true}'
+```
 
 ## Deployment
 
@@ -46,7 +72,8 @@ We use a helper script to deploy the Cloud Function with the correct configurati
 
     This command deploys a **Gen2 Cloud Function** (`graph-loader-function`) with:
     *   **Runtime**: Python 3.11
-    *   **Trigger**: GCS Object Finalized on `raw_graph_data` bucket.
+    *   **Trigger**: HTTP (Authenticated)
+    *   **Entry Point**: `process_manual_trigger`
     *   **Memory**: 512Mi.
 
 ## Local Development

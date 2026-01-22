@@ -11,8 +11,8 @@ PROJECT_ID = "repetitive-shortest-paths"
 DATASET_ID = "graph_data"
 
 # Constants for Dataflow
-TEMP_LOCATION = "gs://repetitive_shortest_paths_contractions_dataflow/temp"
-STAGING_LOCATION = "gs://repetitive_shortest_paths_contractions_dataflow/staging"
+TEMP_LOCATION = "gs://shortest_paths_preprocessing_dataflow/temp"
+STAGING_LOCATION = "gs://shortest_paths_preprocessing_dataflow/staging"
 INSTANCE_ID = "routing-instance"
 SHORTCUTS_TABLE = "shortcuts"
 SHARDS_TABLE = "shards"
@@ -82,24 +82,33 @@ def load_and_process_file(bucket, file_name):
 
             -- Calculate the ShardId
             UPDATE `{table_id}`
-            SET ShardId = S2_CELLIDFROMPOINT(ST_GEOGPOINT(x, y), 12)
+            SET ShardId = S2_CELLIDFROMPOINT(ST_GEOGPOINT(x, y), 9)
             WHERE TRUE;
         """
         print(f"Running ShardId update query for {table_id}...")
         client.query(setup_query).result()
         print("ShardId column ensured and values calculated.")
 
-def trigger_pipeline():
+def trigger_pipeline(run_locally=False):
     current_dir = pathlib.Path(__file__).parent.absolute()
     setup_file_path = str(current_dir / "setup.py")
 
-    pipeline_args = [
-        f"--project={PROJECT_ID}",
-        f"--runner=DataflowRunner",
-        f"--region={REGION}",
-        f"--temp_location={TEMP_LOCATION}",
-        f"--staging_location={STAGING_LOCATION}",
-    ]
+    if run_locally:
+        pipeline_args = [
+            f"--project={PROJECT_ID}",
+            f"--runner=DirectRunner",
+            f"--temp_location={TEMP_LOCATION}",
+        ]
+    else:
+        pipeline_args = [
+            f"--project={PROJECT_ID}",
+            f"--runner=DataflowRunner",
+            f"--region={REGION}",
+            f"--temp_location={TEMP_LOCATION}",
+            f"--staging_location={STAGING_LOCATION}",
+            f"--worker_zone=us-central1-a",
+            f"--machine_type=e2-standard-2",
+        ]
     
     create_pipeline(
         project=PROJECT_ID,

@@ -14,15 +14,19 @@ def process_manual_trigger(request):
     else:
         return 'Missing "bucket" in request JSON', 400
 
-    print(f"Manual trigger received for bucket: {bucket}")
+    skip_load = request_json.get('skip_load', False)
 
-    # Process nodes and edges
-    # We explicitly look for these two files as per the requirements
-    print("Loading nodes...")
-    load_and_process_file(bucket, "graph_data/nodes.csv")
-    
-    print("Loading edges...")
-    load_and_process_file(bucket, "graph_data/edges.csv")
+    print(f"Manual trigger received for bucket: {bucket}, skip_load: {skip_load}")
+
+    if not skip_load:
+        # Process nodes and edges
+        print("Loading nodes...")
+        load_and_process_file(bucket, "graph_data/nodes.csv")
+        
+        print("Loading edges...")
+        load_and_process_file(bucket, "graph_data/edges.csv")
+    else:
+        print("Skipping data load as requested.")
     
     # Trigger the pipeline unconditionally
     print("Triggering pipeline...")
