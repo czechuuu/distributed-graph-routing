@@ -1,87 +1,109 @@
 # Preprocessing Subsystem
 
-The **Preprocessing** subsystem is responsible for ingesting raw graph data (CSV), loading it into BigQuery, and processing it via a distributed Dataflow pipeline to prepare it for the Serving Layer.
+The **Preprocessing** subsystem ingests raw graph data from GCS (parquet) and processes it with Dataflow jobs.
 
-## Architecture
+## Architecture (Job 1)
 
-1.  **Ingestion**:
-    *   Users upload files to a Google Cloud Storage (GCS) bucket (e.g., `raw_graph_data`):
-        *   `graph_data/nodes.csv`
-        *   `graph_data/edges.csv`
+1. **Ingestion**:
+   * Nodes parquet: `gs://rsp_graph_data/raw/nodes/*`
+   * Edges parquet: `gs://rsp_graph_data/raw/edges/*`
 
-2.  **Triggering**:
-    *   A **Google Cloud Function** (`graph-loader-function`) is triggered manually via HTTP request to process the files.
+2. **Processing (Dataflow Job 1)**:
+   * Assigns S2 shard IDs at level 9 to nodes (distributed).
+   * Joins edges to node shard IDs (distributed CoGroupByKey).
+   * Splits bridge edges vs internal edges.
+   * Derives in-boundary and out-boundary node lists.
 
-3.  **Validation & Loading**:
-    *   The Cloud Function determines if the file is a valid node or edge list (must be in `graph_data/`).
-    *   It effectively enforces a schema and loads the data into **BigQuery** (`graph_data.nodes` and `graph_data.edges`).
-    *   It automatically calculates and updates `ShardId` for nodes based on their geospatial coordinates (S2 Cells).
-    *   **Skip Loading**: The loading step can be optionally skipped if the data is already in BigQuery.
+3. **Outputs**:
+   * Bridges: `gs://rsp_graph_data/processed/bridges/*.parquet`
+   * Per shard: `gs://rsp_graph_data/processed/shard_id=x/`
+     * `edges/*.parquet`
+     * `nodes/*.parquet`
+     * `boundary_in/*.parquet`
+     * `boundary_out/*.parquet`
 
-4.  **Pipeline Trigger**:
-    *   After processing (or skipping), the function unconditionally triggers the **Dataflow Pipeline**.
+## How to Run Job 1
 
-5.  **Processing (Dataflow)**:
-    *   The pipeline runs on Google Dataflow (Apache Beam).
-    *   It reads the full graph from BigQuery.
-    *   It partitions the graph into shards.
-    *   It computes detailed contraction hierarchies (shortcuts) and overlay graphs.
-    *   **Output**: The processed graph data is written to **BigTable** tables:
-        *   `shards`: Intra-shard edges and node locations.
-        *   `shortcuts`: Precomputed shortcut paths for optimized routing.
-        *   `overlay`: High-level graph connecting boundary nodes.
-
-## How to Trigger
-
-To trigger the preprocessing pipeline, first ensure that `graph_data/nodes.csv` and `graph_data/edges.csv` are present in the `raw_graph_data` bucket.
-
-### Standard Trigger (Load Data + Run Pipeline)
-Run the following command to load data from GCS to BigQuery and then start the Dataflow pipeline:
+From the `preprocessing/` directory, use `uv` to run the job (DataflowRunner):
 
 ```bash
-curl -X POST https://us-central1-repetitive-shortest-paths.cloudfunctions.net/graph-loader-function \
--H "Authorization: bearer $(gcloud auth print-identity-token)" \
--H "Content-Type: application/json" \
--d '{"bucket": "raw_graph_data"}'
+cd preprocessing
+uv sync
+uv run python -m dataflow.job1_main \
+  --project=repetitive-shortest-paths \
+  --temp_location=gs://shortest_paths_preprocessing_dataflow/temp \
+  --staging_location=gs://shortest_paths_preprocessing_dataflow/staging \
+  --region=us-central1 \
+  --runner=DataflowRunner \
+  --setup_file=setup.py
 ```
 
-### Pipeline Only (Skip Data Loading)
-To trigger the pipeline **without** reloading data from GCS to BigQuery (e.g., for retries/debugging), add `"skip_load": true` to the JSON body:
+### Job 1 bucket configuration
+
+You can override the source bucket and output bucket with:
+* `--input_nodes="gs://<bucket>/raw/nodes/*"`
+* `--input_edges="gs://<bucket>/raw/edges/*"`
+* `--output_base=gs://<bucket>/processed`
+
+Example test run (using `rsp_graph_data_test`):
 
 ```bash
-curl -X POST https://us-central1-repetitive-shortest-paths.cloudfunctions.net/graph-loader-function \
--H "Authorization: bearer $(gcloud auth print-identity-token)" \
--H "Content-Type: application/json" \
--d '{"bucket": "raw_graph_data", "skip_load": true}'
+cd preprocessing
+uv run python -m dataflow.job1_main \
+  --project=repetitive-shortest-paths \
+  --temp_location=gs://shortest_paths_preprocessing_dataflow/temp \
+  --staging_location=gs://shortest_paths_preprocessing_dataflow/staging \
+  --region=us-central1 \
+  --runner=DataflowRunner \
+  --setup_file=setup.py \
+  --input_nodes="gs://rsp_graph_data_test/raw/nodes/*" \
+  --input_edges="gs://rsp_graph_data_test/raw/edges/*" \
+  --output_base=gs://rsp_graph_data_test/processed
 ```
 
-## Deployment
+## How to Run Job 2
 
-We use a helper script to deploy the Cloud Function with the correct configuration.
+Job 2 consumes stage‑1 outputs and writes protobufs to GCS.
 
-1.  **Prerequisites**:
-    *   `gcloud` CLI installed and authenticated.
-    *   Appropriate permissions (Cloud Functions Developer, Service Account User, etc.).
+```bash
+cd preprocessing
+uv run python -m dataflow.job2_main \
+  --project=repetitive-shortest-paths \
+  --temp_location=gs://shortest_paths_preprocessing_dataflow/temp \
+  --staging_location=gs://shortest_paths_preprocessing_dataflow/staging \
+  --region=us-central1 \
+  --runner=DataflowRunner \
+  --setup_file=setup.py
+```
 
-2.  **Deploy**:
-    Run the deployment script from this directory:
+### Job 2 bucket configuration
 
-    ```bash
-    ./deploy.sh
-    ```
+You can override the source and output bucket with:
+* `--input_base="gs://<bucket>/processed"`
+* `--output_base="gs://<bucket>/protos"`
 
-    This command deploys a **Gen2 Cloud Function** (`graph-loader-function`) with:
-    *   **Runtime**: Python 3.11
-    *   **Trigger**: HTTP (Authenticated)
-    *   **Entry Point**: `process_manual_trigger`
-    *   **Memory**: 512Mi.
+Example test run (using `rsp_graph_data_test`):
+
+```bash
+cd preprocessing
+uv run python -m dataflow.job2_main \
+  --project=repetitive-shortest-paths \
+  --temp_location=gs://shortest_paths_preprocessing_dataflow/temp \
+  --staging_location=gs://shortest_paths_preprocessing_dataflow/staging \
+  --region=us-central1 \
+  --runner=DataflowRunner \
+  --setup_file=setup.py \
+  --input_base="gs://rsp_graph_data_test/processed" \
+  --output_base="gs://rsp_graph_data_test/protos"
+```
 
 ## Local Development
 
 To work on this project locally:
 
-1.  **Install dependencies using uv**:
+1.  **Install dependencies using uv** (from `preprocessing/`):
     ```bash
+    cd preprocessing
     uv sync
     ```
     This creates a valid virtual environment with all pinned dependencies.

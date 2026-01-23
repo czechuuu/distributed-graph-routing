@@ -819,6 +819,15 @@ wheels = [
 ]
 
 [[package]]
+name = "future"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a7/b2/4140c69c6a66432916b26158687e821ba631a4c9273c474343badf84d3ba/future-1.0.0.tar.gz", hash = "sha256:bd2968309307861edae1458a4f8a4f3598c03be43b97521076aebf5d94c07b05", size = 1228490, upload-time = "2024-02-21T11:52:38.461Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/71/ae30dadffc90b9006d77af76b393cb9dfbfc9629f339fc1574a1c52e6806/future-1.0.0-py3-none-any.whl", hash = "sha256:929292d34f5872e70396626ef385ec22355a1fae8ad29e1a734c3e43f9fbc216", size = 491326, upload-time = "2024-02-21T11:52:35.956Z" },
+]
+
+[[package]]
 name = "google-api-core"
 version = "2.29.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2362,6 +2371,7 @@ dependencies = [
     { name = "grpcio-tools", version = "1.76.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
     { name = "igraph" },
     { name = "pip" },
+    { name = "s2sphere" },
 ]
 
 [package.metadata]
@@ -2375,6 +2385,7 @@ requires-dist = [
     { name = "grpcio-tools", specifier = ">=1.65.5" },
     { name = "igraph", specifier = ">=0.11.0" },
     { name = "pip" },
+    { name = "s2sphere", specifier = ">=0.2.5" },
 ]
 
 [[package]]
@@ -3011,6 +3022,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/da/8a/22b7beea3ee0d44b1916c0c1cb0ee3af23b700b6da9f04991899d0c555d4/rsa-4.9.1.tar.gz", hash = "sha256:e7bdbfdb5497da4c07dfd35530e1a902659db6ff241e39d9953cad06ebd0ae75", size = 29034, upload-time = "2025-04-16T09:51:18.218Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/64/8d/0133e4eb4beed9e425d9a98ed6e081a55d195481b7632472be1af08d2f6b/rsa-4.9.1-py3-none-any.whl", hash = "sha256:68635866661c6836b8d39430f97a996acbd61bfa49406748ea243539fe239762", size = 34696, upload-time = "2025-04-16T09:51:17.142Z" },
+]
+
+[[package]]
+name = "s2sphere"
+version = "0.2.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "future" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/01/8e/08260a5f03c642d3f6f040756425dc3f466842c4d5e978f6c2be960dde2f/s2sphere-0.2.5.tar.gz", hash = "sha256:c2478c1ff7c601a59a7151a57b605435897514578fa6bdb8730721c182adbbaf", size = 51789, upload-time = "2017-11-16T17:47:46.202Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/fc/be2251ac7ee75e725027b107ab14d161d829aaac22362f75eaabc859bfba/s2sphere-0.2.5-py2.py3-none-any.whl", hash = "sha256:d2340c9cf458ddc9a89afd1d8048a4195ce6fa6b0095ab900d4be5271e537401", size = 23540, upload-time = "2017-11-16T17:47:48.139Z" },
 ]
 
 [[package]]

@@ -15,16 +15,17 @@ Examples:
 """
 
 import argparse
-import csv
 import math
 import os
 import sys
 import tempfile
 from pathlib import Path
 from urllib.request import urlretrieve
-from typing import Optional
 
 import osmium
+import pyarrow as pa
+import pyarrow.parquet as pq
+from google.cloud import storage
 
 
 # Highway types that are driveable (for road network)
@@ -49,12 +50,7 @@ def get_geofabrik_url(region: str) -> str:
     # Common region mappings to full paths
     region_mappings = {
         'poland': 'europe/poland',
-        'germany': 'europe/germany',
-        'france': 'europe/france',
-        'spain': 'europe/spain',
-        'italy': 'europe/italy',
-        'uk': 'europe/great-britain',
-        'usa': 'north-america/us',
+        'london': 'europe/united-kingdom/england/greater-london',
     }
     
     # Normalize region name
@@ -149,15 +145,46 @@ class EdgeBuilder(osmium.SimpleHandler):
     Third pass: Build edges from highway ways using collected node coordinates.
     """
     
-    def __init__(self, node_coords: dict[int, tuple[float, float]], edges_file: Path):
+    def __init__(self, node_coords: dict[int, tuple[float, float]], edges_file: Path, batch_size: int = 200000):
         super().__init__()
         self.node_coords = node_coords
-        self.edges_file = open(edges_file, 'w', newline='')
-        self.writer = csv.writer(self.edges_file)
-        self.writer.writerow(['u', 'v', 'weight'])
+        self.edges_file = edges_file
+        self.batch_size = batch_size
+        self.schema = pa.schema([
+            ('u', pa.int64()),
+            ('v', pa.int64()),
+            ('weight', pa.float64()),
+        ])
+        self.writer = pq.ParquetWriter(str(edges_file), self.schema)
+        self.u_buffer: list[int] = []
+        self.v_buffer: list[int] = []
+        self.weight_buffer: list[float] = []
         self.edge_count = 0
         self.way_count = 0
-        self.intersection_nodes: set[int] = set()
+
+    def _append_edge(self, u: int, v: int, weight: float) -> None:
+        self.u_buffer.append(u)
+        self.v_buffer.append(v)
+        self.weight_buffer.append(weight)
+        self.edge_count += 1
+        if len(self.u_buffer) >= self.batch_size:
+            self._flush()
+
+    def _flush(self) -> None:
+        if not self.u_buffer:
+            return
+        table = pa.Table.from_pydict(
+            {
+                'u': self.u_buffer,
+                'v': self.v_buffer,
+                'weight': self.weight_buffer,
+            },
+            schema=self.schema,
+        )
+        self.writer.write_table(table)
+        self.u_buffer.clear()
+        self.v_buffer.clear()
+        self.weight_buffer.clear()
     
     def way(self, w):
         highway_type = w.tags.get('highway')
@@ -192,28 +219,26 @@ class EdgeBuilder(osmium.SimpleHandler):
             
             if is_reverse:
                 # Reverse direction
-                self.writer.writerow([v, u, weight])
-                self.edge_count += 1
+                self._append_edge(v, u, weight)
             elif is_oneway:
                 # Forward direction only
-                self.writer.writerow([u, v, weight])
-                self.edge_count += 1
+                self._append_edge(u, v, weight)
             else:
                 # Bidirectional - create edges in both directions
-                self.writer.writerow([u, v, weight])
-                self.writer.writerow([v, u, weight])
-                self.edge_count += 2
+                self._append_edge(u, v, weight)
+                self._append_edge(v, u, weight)
         
         if self.way_count % 100000 == 0:
             print(f"  Processed {self.way_count:,} ways, created {self.edge_count:,} edges...")
     
     def close(self):
-        self.edges_file.close()
+        self._flush()
+        self.writer.close()
 
 
 def process_osm_file(pbf_path: Path, output_dir: Path) -> tuple[Path, Path]:
     """
-    Process an OSM PBF file and generate nodes and edges CSVs.
+    Process an OSM PBF file and generate nodes and edges Parquet files.
     Uses multi-pass streaming to minimize memory usage.
     
     Args:
@@ -224,8 +249,8 @@ def process_osm_file(pbf_path: Path, output_dir: Path) -> tuple[Path, Path]:
         Tuple of (nodes_file_path, edges_file_path)
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    nodes_file = output_dir / 'nodes.csv'
-    edges_file = output_dir / 'edges.csv'
+    nodes_file = output_dir / 'nodes.parquet'
+    edges_file = output_dir / 'edges.parquet'
     
     print("\n=== Pass 1/3: Collecting highway node IDs ===")
     node_collector = NodeCollector()
@@ -241,13 +266,20 @@ def process_osm_file(pbf_path: Path, output_dir: Path) -> tuple[Path, Path]:
     # Free memory from first pass
     del node_collector.highway_node_ids
     
-    # Write nodes to CSV as we have them in memory
-    print("\nWriting nodes to CSV...")
-    with open(nodes_file, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['id', 'y', 'x'])
-        for node_id, (lat, lon) in node_extractor.node_coords.items():
-            writer.writerow([node_id, lat, lon])
+    # Write nodes to Parquet as we have them in memory
+    print("\nWriting nodes to Parquet...")
+    node_ids = []
+    lats = []
+    lons = []
+    for node_id, (lat, lon) in node_extractor.node_coords.items():
+        node_ids.append(node_id)
+        lats.append(lat)
+        lons.append(lon)
+    nodes_table = pa.Table.from_pydict(
+        {'id': node_ids, 'y': lats, 'x': lons},
+        schema=pa.schema([('id', pa.int64()), ('y', pa.float64()), ('x', pa.float64())]),
+    )
+    pq.write_table(nodes_table, nodes_file)
     print(f"Wrote {len(node_extractor.node_coords):,} nodes to {nodes_file}")
     
     print("\n=== Pass 3/3: Building edges ===")
@@ -259,6 +291,16 @@ def process_osm_file(pbf_path: Path, output_dir: Path) -> tuple[Path, Path]:
     print(f"Wrote edges to {edges_file}")
     
     return nodes_file, edges_file
+
+
+def upload_to_gcs(local_path: Path, bucket_name: str, destination_prefix: str) -> None:
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    destination_path = f"{destination_prefix.rstrip('/')}/{local_path.name}"
+    blob = bucket.blob(destination_path)
+    print(f"Uploading {local_path} to gs://{bucket_name}/{destination_path}...")
+    blob.upload_from_filename(local_path)
+    print(f"Uploaded to gs://{bucket_name}/{destination_path}")
 
 
 def main():
@@ -335,6 +377,9 @@ Examples:
         print(f"\nFile sizes:")
         print(f"  Nodes: {nodes_size:.1f} MB")
         print(f"  Edges: {edges_size:.1f} MB")
+
+        upload_to_gcs(nodes_file, "rsp_graph_data_test", "raw/nodes")
+        upload_to_gcs(edges_file, "rsp_graph_data_test", "raw/edges")
         
     finally:
         # Clean up temp directory if used

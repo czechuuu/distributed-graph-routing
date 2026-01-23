@@ -2,18 +2,15 @@ syntax = "proto3";
 
 package routing;
 
-// TODO - right now both graphs are designed for minimal duplication
-// but we can try to duplicate some data in the OverlayGraph to 
-// make it faster to load
+// GCS output protos for preprocessing stages.
 
-// ----------------------------------------------------------------------------------------
-
-
-// BIGTABLE TABLE: shards
-// ROW KEY: "S#" + s2_cell_id
 message ShardGraph {
     repeated Edge edges = 1;
     repeated NodeLocation locations = 2;
+}
+
+message Shortcuts {
+    repeated Edge edges = 1;
 }
 
 message Edge {
@@ -29,27 +26,13 @@ message NodeLocation {
     float y = 3;
 }
 
-
-// BIGTABLE TABLE: shortcuts
-// ROW KEY: "P#" + from_node_id + "#" + to_node_id
-message ShortcutPath {
-    repeated fixed64 nodes = 1 [packed = true];
-}
-
-
-// BIGTABLE TABLE: node_index
-// ROW KEY: "N#" + node_id (string)
-message ShardLookup {
-    fixed64 shard_id = 1;
-}
-
-// BIGTABLE TABLE: overlay_graph
-// ROW KEY: "O#"
-// Single row with all the data.
 message OverlayGraph {
-    // Bridges (connecting different shards) 
+    // Bridges (connecting different shards)
     repeated Edge bridges = 1;
 
-    // Shortcuts (connecting two nodes in the same shard)
+    // Shortcuts (connecting two boundary nodes in the same shard)
     repeated Edge shortcuts = 2;
+
+    // Boundary node locations for rendering.
+    repeated NodeLocation boundary_locations = 3;
 }

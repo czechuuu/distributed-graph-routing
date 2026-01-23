@@ -1,0 +1,330 @@
+import apache_beam as beam
+import heapq
+import math
+import re
+from collections import defaultdict
+from typing import Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
+
+from apache_beam.io.parquetio import ReadAllFromParquet, ReadFromParquet
+from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
+
+from .io_wrappers import WriteBytesByDestination
+from .storage_types import bigtable_storage_pb2
+
+_SHARD_RE = re.compile(r"/shard_id=(\d+)/")
+
+
+class EdgeBase(NamedTuple):
+    u: int
+    v: int
+    weight: float
+
+
+class NodeLocationRow(NamedTuple):
+    node_id: int
+    x: float
+    y: float
+
+
+beam.coders.registry.register_coder(EdgeBase, beam.coders.RowCoder)
+beam.coders.registry.register_coder(NodeLocationRow, beam.coders.RowCoder)
+
+
+def _extract_shard_id(path: str) -> int:
+    match = _SHARD_RE.search(path)
+    if not match:
+        raise ValueError(f"Shard id not found in path: {path}")
+    return int(match.group(1))
+
+
+def _read_parquet_with_shard_id(pipeline, file_pattern, label, row_mapper):
+    return (
+        pipeline
+        | f"Create{label}Pattern" >> beam.Create([file_pattern])
+        | f"Read{label}Parquet" >> ReadAllFromParquet(with_filename=True)
+        | f"Parse{label}Shard"
+        >> beam.Map(lambda path_row: (_extract_shard_id(path_row[0]), row_mapper(path_row[1])))
+    )
+
+
+def _edge_from_row(row) -> EdgeBase:
+    return EdgeBase(u=int(row["u"]), v=int(row["v"]), weight=float(row["weight"]))
+
+
+def _node_id_from_row(row) -> int:
+    return int(row["node_id"])
+
+
+def _node_location_from_row(row) -> NodeLocationRow:
+    return NodeLocationRow(
+        node_id=int(row["id"]), x=float(row["x"]), y=float(row["y"])
+    )
+
+
+def _weight_to_uint32(weight: float) -> int:
+    if math.isnan(weight) or math.isinf(weight):
+        return 0
+    return max(0, int(round(weight)))
+
+
+def _dijkstra_targets(
+    adjacency: Dict[int, List[Tuple[int, float]]],
+    source: int,
+    targets: Set[int],
+) -> Dict[int, float]:
+    if not targets:
+        return {}
+
+    distances: Dict[int, float] = {source: 0.0}
+    heap: List[Tuple[float, int]] = [(0.0, source)]
+    remaining = set(targets)
+    found: Dict[int, float] = {}
+
+    while heap and remaining:
+        dist_u, u = heapq.heappop(heap)
+        if dist_u != distances.get(u):
+            continue
+
+        if u in remaining:
+            found[u] = dist_u
+            remaining.remove(u)
+            if not remaining:
+                break
+
+        for v, weight in adjacency.get(u, []):
+            nd = dist_u + weight
+            if nd < distances.get(v, math.inf):
+                distances[v] = nd
+                heapq.heappush(heap, (nd, v))
+
+    return found
+
+
+class ProcessShard(beam.DoFn):
+    def process(self, element):
+        shard_id, data = element
+        edge_list = list(data.get("edges", []))
+        node_locations = list(data.get("nodes", []))
+        boundary_in = set(data.get("boundary_in", []))
+        boundary_out = set(data.get("boundary_out", []))
+        boundary_nodes = boundary_in | boundary_out
+
+        adjacency: Dict[int, List[Tuple[int, float]]] = defaultdict(list)
+        for edge in edge_list:
+            adjacency[edge.u].append((edge.v, edge.weight))
+
+        shard_pb = bigtable_storage_pb2.ShardGraph()
+        for edge in edge_list:
+            pb_edge = shard_pb.edges.add()
+            pb_edge.from_node_id = edge.u
+            pb_edge.to_node_id = edge.v
+            pb_edge.weight = _weight_to_uint32(edge.weight)
+            pb_edge.bidirectional = False
+
+        node_lookup = {}
+        for node in node_locations:
+            node_lookup[node.node_id] = node
+            loc = shard_pb.locations.add()
+            loc.node_id = node.node_id
+            loc.x = node.x
+            loc.y = node.y
+
+        yield beam.pvalue.TaggedOutput(
+            "shard_pb", (shard_id, shard_pb.SerializeToString())
+        )
+
+        shortcut_edges: List[Tuple[int, int, int]] = []
+        if boundary_in and boundary_out:
+            for src in boundary_in:
+                distances = _dijkstra_targets(adjacency, src, boundary_out)
+                for dst, dist in distances.items():
+                    if src == dst:
+                        continue
+                    shortcut_edges.append((src, dst, _weight_to_uint32(dist)))
+                    yield beam.pvalue.TaggedOutput(
+                        "shortcuts_edge", ("shortcuts", src, dst, _weight_to_uint32(dist))
+                    )
+
+        shortcuts_pb = bigtable_storage_pb2.Shortcuts()
+        for src, dst, weight in shortcut_edges:
+            pb_edge = shortcuts_pb.edges.add()
+            pb_edge.from_node_id = src
+            pb_edge.to_node_id = dst
+            pb_edge.weight = weight
+            pb_edge.bidirectional = False
+
+        yield beam.pvalue.TaggedOutput(
+            "shortcuts_pb", (shard_id, shortcuts_pb.SerializeToString())
+        )
+
+        for node_id in boundary_nodes:
+            node = node_lookup.get(node_id)
+            if node:
+                yield beam.pvalue.TaggedOutput(
+                    "boundary_location",
+                    ("boundary_location", node.node_id, node.x, node.y),
+                )
+
+
+class MergeOverlayGraph(beam.CombineFn):
+    def create_accumulator(self):
+        return {"bridges": [], "shortcuts": [], "boundary_locations": {}}
+
+    def add_input(self, accumulator, element):
+        edge_type, *rest = element
+        if edge_type == "boundary_location":
+            node_id, x, y = rest
+            if node_id not in accumulator["boundary_locations"]:
+                accumulator["boundary_locations"][node_id] = (x, y)
+        else:
+            u, v, weight = rest
+            accumulator[edge_type].append((u, v, weight))
+        return accumulator
+
+    def merge_accumulators(self, accumulators):
+        merged = {"bridges": [], "shortcuts": [], "boundary_locations": {}}
+        for acc in accumulators:
+            merged["bridges"].extend(acc["bridges"])
+            merged["shortcuts"].extend(acc["shortcuts"])
+            merged["boundary_locations"].update(acc["boundary_locations"])
+        return merged
+
+    def extract_output(self, accumulator):
+        overlay_pb = bigtable_storage_pb2.OverlayGraph()
+
+        for u, v, weight in accumulator["bridges"]:
+            pb_edge = overlay_pb.bridges.add()
+            pb_edge.from_node_id = u
+            pb_edge.to_node_id = v
+            pb_edge.weight = weight
+            pb_edge.bidirectional = False
+
+        for u, v, weight in accumulator["shortcuts"]:
+            pb_edge = overlay_pb.shortcuts.add()
+            pb_edge.from_node_id = u
+            pb_edge.to_node_id = v
+            pb_edge.weight = weight
+            pb_edge.bidirectional = False
+
+        for node_id, (x, y) in accumulator["boundary_locations"].items():
+            loc = overlay_pb.boundary_locations.add()
+            loc.node_id = node_id
+            loc.x = x
+            loc.y = y
+
+        return overlay_pb.SerializeToString()
+
+
+def create_job2_pipeline(
+    project,
+    temp_location,
+    input_base,
+    output_base,
+    setup_file,
+    pipeline_args=None,
+):
+    if pipeline_args is None:
+        pipeline_args = []
+
+    is_dataflow = any("DataflowRunner" in arg for arg in pipeline_args)
+    if is_dataflow:
+        pipeline_args.append("--prebuild_sdk_container_engine=cloud_build")
+        pipeline_args.append(
+            f"--docker_registry_push_url=gcr.io/{project}/dataflow/graph-routing-worker-sdk"
+        )
+        pipeline_args.append("--experiments=use_runner_v2")
+        pipeline_args.append(
+            f"--sdk_container_image=docker.io/apache/beam_python3.11_sdk:{beam.version.__version__}"
+        )
+
+    options = PipelineOptions(flags=pipeline_args)
+    options.view_as(SetupOptions).save_main_session = True
+
+    google_cloud_options = options.view_as(
+        beam.options.pipeline_options.GoogleCloudOptions
+    )
+    google_cloud_options.project = project
+    google_cloud_options.temp_location = temp_location
+
+    setup_options = options.view_as(SetupOptions)
+    setup_options.setup_file = setup_file
+
+    input_base = input_base.rstrip("/")
+    output_base = output_base.rstrip("/")
+
+    nodes_pattern = f"{input_base}/shard_id=*/nodes/*.parquet"
+    edges_pattern = f"{input_base}/shard_id=*/edges/*.parquet"
+    boundary_in_pattern = f"{input_base}/shard_id=*/boundary_in/*.parquet"
+    boundary_out_pattern = f"{input_base}/shard_id=*/boundary_out/*.parquet"
+    bridges_pattern = f"{input_base}/bridges/*.parquet"
+
+    with beam.Pipeline(options=options) as p:
+        nodes_by_shard = _read_parquet_with_shard_id(
+            p, nodes_pattern, "Nodes", _node_location_from_row
+        )
+        edges_by_shard = _read_parquet_with_shard_id(
+            p, edges_pattern, "Edges", _edge_from_row
+        )
+        boundary_in_by_shard = _read_parquet_with_shard_id(
+            p, boundary_in_pattern, "BoundaryIn", _node_id_from_row
+        )
+        boundary_out_by_shard = _read_parquet_with_shard_id(
+            p, boundary_out_pattern, "BoundaryOut", _node_id_from_row
+        )
+
+        grouped = (
+            {
+                "nodes": nodes_by_shard,
+                "edges": edges_by_shard,
+                "boundary_in": boundary_in_by_shard,
+                "boundary_out": boundary_out_by_shard,
+            }
+            | "GroupByShardId" >> beam.CoGroupByKey()
+        )
+
+        shard_results = grouped | "ProcessShard" >> beam.ParDo(ProcessShard()).with_outputs(
+            "shard_pb", "shortcuts_pb", "shortcuts_edge", "boundary_location"
+        )
+
+        shard_pbs = shard_results.shard_pb
+        shortcuts_pbs = shard_results.shortcuts_pb
+        shortcut_edges = shard_results.shortcuts_edge
+        boundary_locations = shard_results.boundary_location
+
+        _ = shard_pbs | "WriteShardProtos" >> WriteBytesByDestination(
+            base_path=output_base,
+            destination_fn=lambda kv: f"shard_id={kv[0]}/shard_graph",
+            file_name_suffix=".pb",
+            shards=1,
+        )
+
+        _ = shortcuts_pbs | "WriteShortcutProtos" >> WriteBytesByDestination(
+            base_path=output_base,
+            destination_fn=lambda kv: f"shard_id={kv[0]}/shortcuts",
+            file_name_suffix=".pb",
+            shards=1,
+        )
+
+        bridges = (
+            p
+            | "ReadBridges" >> ReadFromParquet(bridges_pattern)
+            | "NormalizeBridges"
+            >> beam.Map(lambda row: ("bridges", int(row["u"]), int(row["v"]), _weight_to_uint32(row["weight"])))
+        )
+
+        overlay_edges = (
+            bridges,
+            shortcut_edges,
+            boundary_locations,
+        ) | "FlattenOverlayEdges" >> beam.Flatten()
+
+        overlay_pb = overlay_edges | "MergeOverlayGraph" >> beam.CombineGlobally(
+            MergeOverlayGraph()
+        )
+
+        _ = overlay_pb | "WriteOverlay" >> WriteBytesByDestination(
+            base_path=output_base,
+            destination_fn=lambda _: "overlay_graph",
+            file_name_suffix=".pb",
+            shards=1,
+        )
