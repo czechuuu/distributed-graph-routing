@@ -6,8 +6,11 @@ requires-python = ">=3.11"
 dependencies = [
     "google-cloud-bigtable>=2.35.0",
     "google-cloud-storage>=2.18.0",
+    "grpcio-tools",
+    "igraph",
     "osmium>=4.0.0",
     "pyarrow>=17.0.0",
+    "protobuf",
 ]
 
 [tool.uv]

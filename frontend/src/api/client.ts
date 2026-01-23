@@ -1,0 +1,54 @@
+import type {
+  RouteExpandRequest,
+  RouteExpandResponse,
+  RouteRequest,
+  RouteResponse,
+  Segment,
+} from './types'
+
+async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+  const response = await fetch(input, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+    ...init,
+  })
+
+  const contentType = response.headers.get('content-type') ?? ''
+  const payload = contentType.includes('application/json')
+    ? await response.json()
+    : null
+
+  if (!response.ok) {
+    if (payload && typeof payload === 'object') {
+      const detail = (payload as { detail?: string; error?: { message?: string } })
+      const message = detail.detail ?? detail.error?.message
+      if (message) {
+        throw new Error(message)
+      }
+    }
+    throw new Error(`Request failed: ${response.status}`)
+  }
+
+  return payload as T
+}
+
+export function fetchRoute(request: RouteRequest): Promise<RouteResponse> {
+  return fetchJson<RouteResponse>('/v1/route', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  })
+}
+
+export function expandSegments(
+  segments: Segment[],
+): Promise<RouteExpandResponse> {
+  const payload: RouteExpandRequest = {
+    segments: segments.map((segment) => ({ u: segment.u, v: segment.v })),
+  }
+  return fetchJson<RouteExpandResponse>('/v1/route/expand', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}

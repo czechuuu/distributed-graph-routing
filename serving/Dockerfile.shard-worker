@@ -1,0 +1,13 @@
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm
+
+WORKDIR /app
+
+COPY serving/pyproject.toml serving/uv.lock ./
+RUN uv sync --frozen --no-dev
+
+COPY serving/serving ./serving
+
+EXPOSE 50051
+EXPOSE 8081
+
+CMD ["uv", "run", "python", "-m", "serving.shard_worker"]

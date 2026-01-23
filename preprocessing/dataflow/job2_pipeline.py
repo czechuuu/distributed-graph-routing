@@ -12,7 +12,7 @@ from apache_beam.io.parquetio import ReadFromParquet
 from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
 
 from .io_wrappers import WriteBytesByDestination
-from .storage_types import bigtable_storage_pb2
+from .storage_types import gcs_storage_pb2
 
 _SHARD_RE = re.compile(r"/shard_id=(\d+)/")
 
@@ -116,7 +116,9 @@ class ProcessShard(beam.DoFn):
         node_ids = [node.node_id for node in node_locations]
         id_to_idx = {node_id: idx for idx, node_id in enumerate(node_ids)}
 
-        shard_pb = bigtable_storage_pb2.ShardGraph()
+        shard_pb = gcs_storage_pb2.ShardGraph()
+        shard_pb.boundary_in_node_ids.extend(sorted(boundary_in))
+        shard_pb.boundary_out_node_ids.extend(sorted(boundary_out))
         for edge in edge_list:
             pb_edge = shard_pb.edges.add()
             pb_edge.from_node_id = edge.u
@@ -177,7 +179,7 @@ class ProcessShard(beam.DoFn):
                             "shortcuts_edge", ("shortcuts", src, dst, weight)
                         )
 
-        shortcuts_pb = bigtable_storage_pb2.Shortcuts()
+        shortcuts_pb = gcs_storage_pb2.Shortcuts()
         for src, dst, weight in shortcut_edges:
             pb_edge = shortcuts_pb.edges.add()
             pb_edge.from_node_id = src
@@ -265,7 +267,7 @@ class MergeOverlayGraph(beam.CombineFn):
         return merged
 
     def extract_output(self, accumulator):
-        overlay_pb = bigtable_storage_pb2.OverlayGraph()
+        overlay_pb = gcs_storage_pb2.OverlayGraph()
 
         for u, v, weight in accumulator["bridges"]:
             pb_edge = overlay_pb.bridges.add()
