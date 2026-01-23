@@ -1,29 +1,53 @@
-# MVP Client ↔ Orchestrator API (Endpoint-Keyed Segments + Lazy Expansion)
+# MVP Client ↔ Routing API
 
-This document specifies a **minimal working** HTTP/JSON API between the frontend client and the backend **Orchestrator**.
+This document specifies a **minimal working** HTTP/JSON API between the frontend client and the backend **Routing API**.
 
 ## Scope and non-goals
 
 - **Scope**:
   - Client requests a route between two geographic points.
-  - Orchestrator returns a **compressed route** as a list of **segments** (each segment has endpoints and can be expanded).
+  - Routing API returns a **compressed route** as a list of **segments** (each segment has endpoints and can be expanded).
   - Client requests **batch expansion** of one or more segments.
 - **Non-goals**:
-  - Client does **not** handle node IDs or shards.
+  - Client does **not interpret** node IDs or shards (IDs are opaque tokens that must be echoed back).
   - No “preview geometry”, no polyline simplification parameters, no partial streaming.
   - No graph versioning (assume the graph is immutable).
 
 ## High-level contract
 
-- **Shards are invisible to the client**. All requests go to the Orchestrator.
-- **Segments are identified only by their endpoints**: `(u, v)`.
+- **Shards are invisible to the client**. All requests go to the Routing API.
+- **Segments are identified by their endpoint node IDs**: `(u.node_id, v.node_id)` (directional).
 - The client only **draws what the backend returns**.
-- Clients MUST treat returned endpoints as opaque tokens and MUST NOT recompute/round them.
-- **Segment expansion is deterministic** for a given `(u, v)` pair.
+- Clients MUST treat returned node IDs as opaque tokens and MUST NOT parse/rewrite them.
+- **Segment expansion is deterministic** for a given `(u.node_id, v.node_id)` pair.
 
 ## Data types
 
+### NodeId
+
+`NodeId` is a 64-bit node identifier serialized as a JSON string (decimal) to avoid precision loss in JavaScript.
+
+```json
+"8963866048"
+```
+
+### NodeRef
+
+Node reference used throughout the API. It is both:
+- a stable identifier (`node_id`) and
+- a display-friendly coordinate (`lat`, `lng`)
+
+```json
+{ "node_id": "8963866048", "lat": 52.2297, "lng": 21.0122 }
+```
+
+- `node_id`: `NodeId` (string)
+- `lat`: number, degrees (float64)
+- `lng`: number, degrees (float64)
+
 ### Coordinate
+
+Used only for inputs that are not yet snapped to a graph node.
 
 ```json
 { "lat": 52.2297, "lng": 21.0122 }
@@ -32,23 +56,16 @@ This document specifies a **minimal working** HTTP/JSON API between the frontend
 - `lat`: number, degrees (float64)
 - `lng`: number, degrees (float64)
 
-#### Coordinate identity / serialization requirements (MVP)
-
-This API uses JSON numbers for coordinates. Segment identity depends on exact float64 equality.
-
-- Clients MUST echo back the exact `u`/`v` coordinate values they received from `/v1/route` when calling `/v1/route/expand`.
-- Clients MUST NOT format/round coordinates to a fixed number of decimal places.
-- If a client uses a non-standard JSON serializer, it MUST serialize float64 with enough precision to round-trip (rule of thumb: at least 17 significant digits).
-- Backends SHOULD compare endpoint coordinates by float64 value (ideally by IEEE-754 bit pattern), not by the textual JSON representation.
-
 ### SegmentRef
 
-The minimal reference used to identify a segment for expansion. Directional: `(u, v)` is distinct from `(v, u)`.
+The minimal reference used to identify a segment for expansion.
+
+Directional: `(u.node_id, v.node_id)` is distinct from `(v.node_id, u.node_id)`.
 
 ```json
 {
-  "u": { "lat": 52.22971, "lng": 21.01218 },
-  "v": { "lat": 52.22990, "lng": 21.01280 }
+  "u": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
+  "v": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 }
 }
 ```
 
@@ -56,21 +73,21 @@ The minimal reference used to identify a segment for expansion. Directional: `(u
 
 ```json
 {
-  "u": { "lat": 52.22971, "lng": 21.01218 },
-  "v": { "lat": 52.22990, "lng": 21.01280 },
+  "u": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
+  "v": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
   "expandable": true
 }
 ```
 
-- `u`, `v`: `Coordinate` endpoints of this segment (also the segment identifier)
+- `u`, `v`: `NodeRef` endpoints of this segment (also the segment identifier; also used for drawing and shard routing)
 - `expandable`: boolean
 
 ### ExpandedSegment
 
 ```json
 {
-  "u": { "lat": 52.22971, "lng": 21.01218 },
-  "v": { "lat": 52.22990, "lng": 21.01280 },
+  "u": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
+  "v": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
   "polyline": [
     { "lat": 52.22971, "lng": 21.01218 },
     { "lat": 52.22975, "lng": 21.01230 },
@@ -79,7 +96,7 @@ The minimal reference used to identify a segment for expansion. Directional: `(u
 }
 ```
 
-- `u`, `v`: the `SegmentRef` endpoints being expanded
+- `u`, `v`: the `NodeRef` endpoints being expanded
 - `polyline`: array of `Coordinate`
   - The first point SHOULD equal the segment’s `u` and the last point SHOULD equal `v`.
   - Intermediate points represent the fully expanded path within that segment.
@@ -106,8 +123,8 @@ Compute a route between two geographic points and return a compressed route as s
   "path_found": true,
   "segments": [
     {
-      "u": { "lat": 52.22971, "lng": 21.01218 },
-      "v": { "lat": 52.22990, "lng": 21.01280 },
+      "u": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
+      "v": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
       "expandable": true
     }
   ],
@@ -138,14 +155,15 @@ Compute a route between two geographic points and return a compressed route as s
 
 #### Semantics
 
-- Orchestrator MUST return segment endpoints (`u`, `v`) as canonical stored float64 values.
-- Clients MUST use the returned `(u, v)` endpoints as the only identifiers when requesting expansion.
+- Routing API MUST return `u.node_id` and `v.node_id` for every segment.
+- Clients MUST use the returned `(u.node_id, v.node_id)` pair as the identifier when requesting expansion.
+- The Routing API SHOULD return `u.lat/lng` and `v.lat/lng` consistent with the returned node IDs.
 
 ## Endpoint: Expand segments (batch)
 
 ### `POST /v1/route/expand`
 
-Expand one or more segments by `(u, v)` endpoints. Client always uses the batch form (batch size may be 1).
+Expand one or more segments by `(u.node_id, v.node_id)` endpoints. Client always uses the batch form (batch size may be 1).
 
 #### Request
 
@@ -153,12 +171,12 @@ Expand one or more segments by `(u, v)` endpoints. Client always uses the batch 
 {
   "segments": [
     {
-      "u": { "lat": 52.22971, "lng": 21.01218 },
-      "v": { "lat": 52.22990, "lng": 21.01280 }
+      "u": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
+      "v": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 }
     },
     {
-      "u": { "lat": 52.22990, "lng": 21.01280 },
-      "v": { "lat": 52.23010, "lng": 21.01310 }
+      "u": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
+      "v": { "node_id": "8963867000", "lat": 52.23010, "lng": 21.01310 }
     }
   ]
 }
@@ -170,8 +188,8 @@ Expand one or more segments by `(u, v)` endpoints. Client always uses the batch 
 {
   "expanded": [
     {
-      "u": { "lat": 52.22971, "lng": 21.01218 },
-      "v": { "lat": 52.22990, "lng": 21.01280 },
+      "u": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
+      "v": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
       "polyline": [
         { "lat": 52.22971, "lng": 21.01218 },
         { "lat": 52.22975, "lng": 21.01230 },
@@ -192,22 +210,3 @@ Expand one or more segments by `(u, v)` endpoints. Client always uses the batch 
   "error": { "code": "invalid_request", "message": "segments must be a non-empty array." }
 }
 ```
-
-#### Semantics
-
-- Orchestrator MUST treat `(u, v)` expansion as deterministic:
-  - It MAY return cached results or recompute, but the resulting polyline MUST be stable for a given `(u, v)`.
-- Orchestrator MAY return expanded segments in any order; clients MUST match by `(u, v)` endpoints.
-
-## Determinism requirements (MVP)
-
-To make results stable even if recomputed, the system SHOULD define deterministic tie-breaking:
-
-- Neighbor iteration order is stable (e.g., edges sorted by `(weight, to_node_id)`).
-- Priority queue tie-break includes a stable key (e.g., `(distance, node_id)`).
-
-## Caching (MVP)
-
-- Caching is backend-internal and best-effort.
-- Backends MAY cache expansions keyed by `(u, v) -> polyline` and evict entries at any time.
-

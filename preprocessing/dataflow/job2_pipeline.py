@@ -5,7 +5,10 @@ import re
 from collections import defaultdict
 from typing import Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
-from apache_beam.io.parquetio import ReadAllFromParquet, ReadFromParquet
+import pyarrow.parquet as pq
+from apache_beam.io import fileio
+from apache_beam.io.filesystems import FileSystems
+from apache_beam.io.parquetio import ReadFromParquet
 from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
 
 from .io_wrappers import WriteBytesByDestination
@@ -37,13 +40,14 @@ def _extract_shard_id(path: str) -> int:
     return int(match.group(1))
 
 
-def _read_parquet_with_shard_id(pipeline, file_pattern, label, row_mapper):
+def _read_sharded_paths(pipeline, file_pattern, label, tag):
     return (
         pipeline
-        | f"Create{label}Pattern" >> beam.Create([file_pattern])
-        | f"Read{label}Parquet" >> ReadAllFromParquet(with_filename=True)
-        | f"Parse{label}Shard"
-        >> beam.Map(lambda path_row: (_extract_shard_id(path_row[0]), row_mapper(path_row[1])))
+        | f"Match{label}Files" >> fileio.MatchFiles(file_pattern)
+        | f"Read{label}Matches" >> fileio.ReadMatches()
+        | f"Extract{label}Paths" >> beam.Map(lambda file: file.metadata.path)
+        | f"Tag{label}Paths"
+        >> beam.Map(lambda path: (_extract_shard_id(path), (tag, path)))
     )
 
 
@@ -109,9 +113,8 @@ class ProcessShard(beam.DoFn):
         boundary_out = set(data.get("boundary_out", []))
         boundary_nodes = boundary_in | boundary_out
 
-        adjacency: Dict[int, List[Tuple[int, float]]] = defaultdict(list)
-        for edge in edge_list:
-            adjacency[edge.u].append((edge.v, edge.weight))
+        node_ids = [node.node_id for node in node_locations]
+        id_to_idx = {node_id: idx for idx, node_id in enumerate(node_ids)}
 
         shard_pb = bigtable_storage_pb2.ShardGraph()
         for edge in edge_list:
@@ -134,16 +137,45 @@ class ProcessShard(beam.DoFn):
         )
 
         shortcut_edges: List[Tuple[int, int, int]] = []
-        if boundary_in and boundary_out:
-            for src in boundary_in:
-                distances = _dijkstra_targets(adjacency, src, boundary_out)
-                for dst, dist in distances.items():
-                    if src == dst:
+        if boundary_in and boundary_out and node_ids and edge_list:
+            # Use igraph for faster shortest-paths on each shard.
+            import igraph as ig
+
+            source_ids = [n for n in boundary_in if n in id_to_idx]
+            target_ids = [n for n in boundary_out if n in id_to_idx]
+
+            if source_ids and target_ids:
+                source_idx = [id_to_idx[n] for n in source_ids]
+                target_idx = [id_to_idx[n] for n in target_ids]
+
+                edges_idx = []
+                weights = []
+                for edge in edge_list:
+                    if edge.u not in id_to_idx or edge.v not in id_to_idx:
                         continue
-                    shortcut_edges.append((src, dst, _weight_to_uint32(dist)))
-                    yield beam.pvalue.TaggedOutput(
-                        "shortcuts_edge", ("shortcuts", src, dst, _weight_to_uint32(dist))
-                    )
+                    edges_idx.append((id_to_idx[edge.u], id_to_idx[edge.v]))
+                    weights.append(edge.weight)
+
+                graph = ig.Graph(n=len(node_ids), edges=edges_idx, directed=True)
+                graph.es["weight"] = weights
+
+                distances_matrix = graph.shortest_paths(
+                    source=source_idx, target=target_idx, weights="weight"
+                )
+
+                for src_i, src in enumerate(source_ids):
+                    row = distances_matrix[src_i]
+                    for dst_i, dst in enumerate(target_ids):
+                        if src == dst:
+                            continue
+                        dist = row[dst_i]
+                        if dist == float("inf"):
+                            continue
+                        weight = _weight_to_uint32(dist)
+                        shortcut_edges.append((src, dst, weight))
+                        yield beam.pvalue.TaggedOutput(
+                            "shortcuts_edge", ("shortcuts", src, dst, weight)
+                        )
 
         shortcuts_pb = bigtable_storage_pb2.Shortcuts()
         for src, dst, weight in shortcut_edges:
@@ -164,6 +196,49 @@ class ProcessShard(beam.DoFn):
                     "boundary_location",
                     ("boundary_location", node.node_id, node.x, node.y),
                 )
+
+
+def _iter_parquet_rows(path: str, columns: Optional[List[str]] = None):
+    with FileSystems.open(path) as file_handle:
+        pq_file = pq.ParquetFile(file_handle)
+        for batch in pq_file.iter_batches(columns=columns):
+            for row in batch.to_pylist():
+                yield row
+
+
+class ReadShardFiles(beam.DoFn):
+    def process(self, element):
+        shard_id, tagged_paths = element
+        paths_by_tag: Dict[str, List[str]] = defaultdict(list)
+        for tag, path in tagged_paths:
+            paths_by_tag[tag].append(path)
+
+        edges: List[EdgeBase] = []
+        for path in paths_by_tag.get("edges", []):
+            for row in _iter_parquet_rows(path, columns=["u", "v", "weight"]):
+                edges.append(_edge_from_row(row))
+
+        nodes: List[NodeLocationRow] = []
+        for path in paths_by_tag.get("nodes", []):
+            for row in _iter_parquet_rows(path, columns=["id", "x", "y"]):
+                nodes.append(_node_location_from_row(row))
+
+        boundary_in: List[int] = []
+        for path in paths_by_tag.get("boundary_in", []):
+            for row in _iter_parquet_rows(path, columns=["node_id"]):
+                boundary_in.append(_node_id_from_row(row))
+
+        boundary_out: List[int] = []
+        for path in paths_by_tag.get("boundary_out", []):
+            for row in _iter_parquet_rows(path, columns=["node_id"]):
+                boundary_out.append(_node_id_from_row(row))
+
+        yield (shard_id, {
+            "edges": edges,
+            "nodes": nodes,
+            "boundary_in": boundary_in,
+            "boundary_out": boundary_out,
+        })
 
 
 class MergeOverlayGraph(beam.CombineFn):
@@ -259,30 +334,20 @@ def create_job2_pipeline(
     bridges_pattern = f"{input_base}/bridges/*.parquet"
 
     with beam.Pipeline(options=options) as p:
-        nodes_by_shard = _read_parquet_with_shard_id(
-            p, nodes_pattern, "Nodes", _node_location_from_row
-        )
-        edges_by_shard = _read_parquet_with_shard_id(
-            p, edges_pattern, "Edges", _edge_from_row
-        )
-        boundary_in_by_shard = _read_parquet_with_shard_id(
-            p, boundary_in_pattern, "BoundaryIn", _node_id_from_row
-        )
-        boundary_out_by_shard = _read_parquet_with_shard_id(
-            p, boundary_out_pattern, "BoundaryOut", _node_id_from_row
+        shard_paths = (
+            _read_sharded_paths(p, nodes_pattern, "Nodes", "nodes"),
+            _read_sharded_paths(p, edges_pattern, "Edges", "edges"),
+            _read_sharded_paths(p, boundary_in_pattern, "BoundaryIn", "boundary_in"),
+            _read_sharded_paths(p, boundary_out_pattern, "BoundaryOut", "boundary_out"),
+        ) | "FlattenShardPaths" >> beam.Flatten()
+
+        shard_data = (
+            shard_paths
+            | "GroupShardPaths" >> beam.GroupByKey()
+            | "ReadShardFiles" >> beam.ParDo(ReadShardFiles())
         )
 
-        grouped = (
-            {
-                "nodes": nodes_by_shard,
-                "edges": edges_by_shard,
-                "boundary_in": boundary_in_by_shard,
-                "boundary_out": boundary_out_by_shard,
-            }
-            | "GroupByShardId" >> beam.CoGroupByKey()
-        )
-
-        shard_results = grouped | "ProcessShard" >> beam.ParDo(ProcessShard()).with_outputs(
+        shard_results = shard_data | "ProcessShard" >> beam.ParDo(ProcessShard()).with_outputs(
             "shard_pb", "shortcuts_pb", "shortcuts_edge", "boundary_location"
         )
 
