@@ -45,7 +45,7 @@ class GraphFacade:
                 logger.warning("Overlay row 'O#' not found!")
                 return
 
-            cell = row.cells.get('cf', {}).get(b'val', [])
+            cell = row.cells.get('cf', {}).get(b'data', [])
             
             if cell:
                 overlay_pb = bigtable_storage_pb2.OverlayGraph()
@@ -92,7 +92,7 @@ class GraphFacade:
             row = self.intra_table.read_row(row_key)
             
             if row:
-                cell = row.cells.get('cf', {}).get(b'val', [])
+                cell = row.cells.get('cf', {}).get(b'data', [])
                 if cell:
                     shard_pb = bigtable_storage_pb2.ShardGraph()
                     shard_pb.ParseFromString(cell[0].value)
@@ -158,7 +158,7 @@ class GraphFacade:
             row = self.shortcuts_table.read_row(row_key) # Shortcuts table
             
             if row:
-                cell = row.cells.get('cf', {}).get(b'val', [])
+                cell = row.cells.get('cf', {}).get(b'data', [])
                 if cell:
                     path_proto = bigtable_storage_pb2.ShortcutPath()
                     path_proto.ParseFromString(cell[0].value)
