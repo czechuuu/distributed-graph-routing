@@ -15,6 +15,7 @@ dependencies = [
     "pip",
     "crcmod",
     "s2sphere>=0.2.5",
+    "pyosmium",
 ]
 
 [tool.uv.sources]

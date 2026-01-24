@@ -1,6 +1,55 @@
 # Preprocessing Subsystem
 
-The **Preprocessing** subsystem ingests raw graph data from GCS (parquet) and processes it with Dataflow jobs.
+The **Preprocessing** subsystem ingests raw graph data from GCS (parquet or tiled OSM PBF) and processes it with Dataflow jobs.
+
+## Architecture (Job 0)
+
+1. **Ingestion**:
+   * Tiled OSM PBFs: `gs://rsp_graph_data/osm_tiles/*.osm.pbf`
+2. **Processing (Dataflow Job 0)**:
+   * Parses OSM nodes and driveable ways from PBF tiles.
+   * Joins ways to nodes to compute endpoint coordinates and S2 shard IDs.
+   * Computes edge weights as **travel time seconds** using tag heuristics.
+   * Deduplicates overlapping tiles.
+   * Emits stage‑1 sharded outputs (same layout as Job 1).
+3. **Outputs**:
+   * Bridges: `gs://rsp_graph_data/processed/bridges/*.parquet`
+   * Per shard: `gs://rsp_graph_data/processed/shard_id=x/`
+     * `edges/*.parquet`
+     * `nodes/*.parquet`
+     * `boundary_in/*.parquet`
+     * `boundary_out/*.parquet`
+
+## How to Run Job 0
+
+From the `preprocessing/` directory, use `uv` to run the job (DataflowRunner):
+
+```bash
+cd preprocessing
+uv sync
+uv run python -m dataflow.job0_main \
+  --project=repetitive-shortest-paths \
+  --temp_location=gs://shortest_paths_preprocessing_dataflow/temp \
+  --staging_location=gs://shortest_paths_preprocessing_dataflow/staging \
+  --region=us-central1 \
+  --runner=DataflowRunner \
+  --setup_file=setup.py
+```
+
+### Job 0 bucket configuration
+
+You can override the source bucket and output bucket with:
+* `--input_pbf="gs://<bucket>/osm_tiles/*.osm.pbf"`
+* `--output_base=gs://<bucket>/processed`
+* `--weight_mode=time_s|distance_m` (default: `time_s`)
+
+### Job 0 Dataflow worker container
+
+Job 0 parses `.osm.pbf` files using `pyosmium`, which requires native `libosmium` libraries. Run Job 0 with a custom Dataflow SDK container image that includes `pyosmium` and its native deps.
+
+Example outline:
+1. Build a custom image based on the Beam Python SDK image that installs `pyosmium` and system packages (`libosmium`, `zlib`, etc.).
+2. Pass it via `--sdk_container_image=...` when running Job 0.
 
 ## Architecture (Job 1)
 
