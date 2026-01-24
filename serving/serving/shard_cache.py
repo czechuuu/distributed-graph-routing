@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from .dijkstra import Adjacency
-from .storage_types import gcs_storage_pb2
+from shared.protos import gcs_storage_pb2
 
 
 @dataclass(frozen=True)

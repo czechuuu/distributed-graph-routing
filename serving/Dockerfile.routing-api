@@ -2,12 +2,17 @@ FROM ghcr.io/astral-sh/uv:python3.11-bookworm
 
 WORKDIR /app
 
-COPY serving/pyproject.toml serving/uv.lock ./
-RUN uv sync --frozen --no-dev
+# Workspace lock + member metadata
+COPY pyproject.toml uv.lock ./
+COPY serving/pyproject.toml serving/pyproject.toml
+COPY shared/pyproject.toml shared/pyproject.toml
 
-COPY serving/shard_worker_pb2.py serving/shard_worker_pb2_grpc.py ./
-COPY serving/serving ./serving
+# Package sources needed for editable workspace installs
+COPY serving/serving serving/serving
+COPY shared/shared shared/shared
+
+RUN uv sync --frozen --no-dev --package serving
 
 EXPOSE 8080
 
-CMD ["uv", "run", "python", "-m", "serving.routing_api"]
+CMD ["uv", "run", "--package", "serving", "python", "-m", "serving.routing_api"]

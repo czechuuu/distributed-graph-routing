@@ -44,18 +44,36 @@ uv pip install --python "$PY" \
 
 PROTOC=( "$PY" -m grpc_tools.protoc -I protos )
 
-# gcs_storage.proto (GCS protos used by preprocessing + serving)
-"${PROTOC[@]}" --python_out=preprocessing/dataflow/storage_types \
-              protos/gcs_storage.proto
-"${PROTOC[@]}" --python_out=scripts/storage_types \
-              protos/gcs_storage.proto
-"${PROTOC[@]}" --python_out=serving/serving/storage_types \
+# Canonical output location (single source of truth).
+OUT_DIR="shared/shared/protos"
+mkdir -p "$OUT_DIR"
+
+# gcs_storage.proto (used by preprocessing + serving)
+"${PROTOC[@]}" --python_out="$OUT_DIR" \
               protos/gcs_storage.proto
 
 # shard_worker.proto (gRPC service protos used by serving/worker)
-"${PROTOC[@]}" --python_out=serving \
-              --grpc_python_out=serving \
+"${PROTOC[@]}" --python_out="$OUT_DIR" \
+              --grpc_python_out="$OUT_DIR" \
               protos/shard_worker.proto
+
+# Fix grpc_tools generated imports to be package-relative.
+# grpcio-tools 1.64.1 emits `import shard_worker_pb2 as ...` which won't work when
+# importing as `shared.protos.shard_worker_pb2_grpc`.
+"$PY" - <<'PY'
+from __future__ import annotations
+
+from pathlib import Path
+
+path = Path("shared/shared/protos/shard_worker_pb2_grpc.py")
+txt = path.read_text("utf-8")
+txt2 = txt.replace(
+    "import shard_worker_pb2 as shard__worker__pb2",
+    "from . import shard_worker_pb2 as shard__worker__pb2",
+)
+if txt2 != txt:
+    path.write_text(txt2, "utf-8")
+PY
 
 # Verify headers are exactly Protobuf Python Version: 5.26.1
 "$PY" - <<'PY'
@@ -67,14 +85,12 @@ root = Path.cwd()
 expected = "# Protobuf Python Version: 5.26.1"
 
 pb2_targets = [
-    root / "preprocessing/dataflow/storage_types/gcs_storage_pb2.py",
-    root / "scripts/storage_types/gcs_storage_pb2.py",
-    root / "serving/serving/storage_types/gcs_storage_pb2.py",
-    root / "serving/shard_worker_pb2.py",
+    root / "shared/shared/protos/gcs_storage_pb2.py",
+    root / "shared/shared/protos/shard_worker_pb2.py",
 ]
 
 grpc_targets = [
-    root / "serving/shard_worker_pb2_grpc.py",
+    root / "shared/shared/protos/shard_worker_pb2_grpc.py",
 ]
 
 bad: list[Path] = []
