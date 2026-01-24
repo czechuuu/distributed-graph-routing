@@ -171,6 +171,7 @@ class _PbfHandler(osmium.SimpleHandler):
 
 class ParsePbfDoFn(beam.DoFn):
     def process(self, readable_file: fileio.ReadableFile):
+        import logging
         tmp_path = None
         try:
             with readable_file.open() as handle, tempfile.NamedTemporaryFile(
@@ -184,7 +185,14 @@ class ParsePbfDoFn(beam.DoFn):
                 tmp_path = tmp.name
 
             handler = _PbfHandler()
-            handler.apply_file(tmp_path, locations=True)
+            try:
+                handler.apply_file(tmp_path, locations=True)
+            except RuntimeError as e:
+                # Handle empty or corrupted PBF files gracefully
+                file_path = getattr(readable_file.metadata, 'path', 'unknown')
+                logging.warning(f"Skipping file {file_path}: {e}")
+                return  # Skip this file, don't yield any nodes/edges
+            
             for node in handler.nodes:
                 yield beam.pvalue.TaggedOutput("nodes", node)
             for edge in handler.edges:

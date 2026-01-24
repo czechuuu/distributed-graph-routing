@@ -1554,14 +1554,17 @@ dependencies = [
     { name = "apache-beam", extra = ["gcp"] },
     { name = "build" },
     { name = "crcmod" },
-    { name = "dgr-shared" },
     { name = "functions-framework" },
     { name = "google-cloud-bigquery" },
     { name = "google-cloud-bigtable" },
+    { name = "grpcio" },
     { name = "igraph" },
     { name = "osmium" },
     { name = "pip" },
+    { name = "protobuf" },
+    { name = "pyarrow" },
     { name = "s2sphere" },
+    { name = "setuptools" },
 ]
 
 [package.metadata]
@@ -1569,14 +1572,17 @@ requires-dist = [
     { name = "apache-beam", extras = ["gcp"], specifier = ">=2.70.0" },
     { name = "build", specifier = ">=1.4.0" },
     { name = "crcmod" },
-    { name = "dgr-shared", editable = "shared" },
     { name = "functions-framework", specifier = ">=3.10.0" },
     { name = "google-cloud-bigquery", specifier = ">=3.40.0" },
     { name = "google-cloud-bigtable", specifier = ">=2.35.0" },
+    { name = "grpcio", specifier = ">=1.64.1" },
     { name = "igraph", specifier = ">=0.11.0" },
     { name = "osmium", specifier = ">=4.0.0" },
     { name = "pip" },
+    { name = "protobuf", specifier = ">=5.26.1" },
+    { name = "pyarrow", specifier = ">=18.0.0" },
     { name = "s2sphere", specifier = ">=0.2.5" },
+    { name = "setuptools" },
 ]
 
 [[package]]
