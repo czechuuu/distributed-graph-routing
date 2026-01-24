@@ -82,52 +82,13 @@ def _expand_path(shard_id: int, u_node_id: int, v_node_id: int):
     return stub.ExpandPath(request, timeout=20.0)
 
 
-@app.post("/v1/route", response_model=RouteResponse)
-def route(request: RouteRequest) -> RouteResponse:
-    if overlay_graph is None:
-        raise HTTPException(status_code=500, detail="overlay_graph_not_loaded")
-
-    start_shard = shard_id_for_lat_lng(request.start.lat, request.start.lng)
-    end_shard = shard_id_for_lat_lng(request.end.lat, request.end.lng)
-
-    if start_shard == end_shard:
-        try:
-            response = _fetch_worker_dists(
-                start_shard, request.start.lat, request.start.lng, shard_worker_pb2.BOUNDARY_OUT
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        if not response.ok:
-            raise HTTPException(status_code=422, detail=response.error)
-        try:
-            end_resp = _fetch_worker_dists(
-                end_shard, request.end.lat, request.end.lng, shard_worker_pb2.BOUNDARY_IN
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        if not end_resp.ok:
-            raise HTTPException(status_code=422, detail=end_resp.error)
-        try:
-            expand = _expand_path(
-                start_shard, response.snapped.node_id, end_resp.snapped.node_id
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        if not expand.ok:
-            return RouteResponse(
-                path_found=False, segments=[], summary=RouteSummary(segments_count=0, distance_m=0)
-            )
-        start_node = _node_ref(response.snapped.node_id, response.snapped.lat, response.snapped.lng)
-        end_node = _node_ref(end_resp.snapped.node_id, end_resp.snapped.lat, end_resp.snapped.lng)
-        return RouteResponse(
-            path_found=True,
-            segments=[_segment(start_node, end_node, expandable=True)],
-            summary=RouteSummary(segments_count=1, distance_m=float(expand.total_weight)),
-        )
-
+def _route_same_shard(
+    shard_id: int, start_lat: float, start_lng: float, end_lat: float, end_lng: float
+) -> RouteResponse:
+    """Find a route when both start and end are within the same shard."""
     try:
         start_resp = _fetch_worker_dists(
-            start_shard, request.start.lat, request.start.lng, shard_worker_pb2.BOUNDARY_OUT
+            shard_id, start_lat, start_lng, shard_worker_pb2.BOUNDARY_OUT
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -136,7 +97,58 @@ def route(request: RouteRequest) -> RouteResponse:
 
     try:
         end_resp = _fetch_worker_dists(
-            end_shard, request.end.lat, request.end.lng, shard_worker_pb2.BOUNDARY_IN
+            shard_id, end_lat, end_lng, shard_worker_pb2.BOUNDARY_IN
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not end_resp.ok:
+        raise HTTPException(status_code=422, detail=end_resp.error)
+
+    try:
+        expand = _expand_path(
+            shard_id, start_resp.snapped.node_id, end_resp.snapped.node_id
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    if not expand.ok:
+        return RouteResponse(
+            path_found=False, segments=[], summary=RouteSummary(segments_count=0, distance_m=0)
+        )
+
+    start_node = _node_ref(start_resp.snapped.node_id, start_resp.snapped.lat, start_resp.snapped.lng)
+    end_node = _node_ref(end_resp.snapped.node_id, end_resp.snapped.lat, end_resp.snapped.lng)
+    return RouteResponse(
+        path_found=True,
+        segments=[_segment(start_node, end_node, expandable=True)],
+        summary=RouteSummary(segments_count=1, distance_m=float(expand.total_weight)),
+    )
+
+
+def _route_different_shards(
+    start_shard: int,
+    end_shard: int,
+    start_lat: float,
+    start_lng: float,
+    end_lat: float,
+    end_lng: float,
+) -> RouteResponse:
+    """Find a route when start and end are in different shards, using the overlay graph."""
+    if overlay_graph is None:
+        raise HTTPException(status_code=500, detail="overlay_graph_not_loaded")
+
+    try:
+        start_resp = _fetch_worker_dists(
+            start_shard, start_lat, start_lng, shard_worker_pb2.BOUNDARY_OUT
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not start_resp.ok:
+        raise HTTPException(status_code=422, detail=start_resp.error)
+
+    try:
+        end_resp = _fetch_worker_dists(
+            end_shard, end_lat, end_lng, shard_worker_pb2.BOUNDARY_IN
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -180,17 +192,44 @@ def route(request: RouteRequest) -> RouteResponse:
 
     segments: List[Segment] = []
     for i in range(len(nodes) - 1):
-        start_node = nodes[i]
-        end_node = nodes[i + 1]
-        same_shard = shard_id_for_lat_lng(start_node["lat"], start_node["lng"]) == shard_id_for_lat_lng(
-            end_node["lat"], end_node["lng"]
+        seg_start = nodes[i]
+        seg_end = nodes[i + 1]
+        same_shard = shard_id_for_lat_lng(seg_start["lat"], seg_start["lng"]) == shard_id_for_lat_lng(
+            seg_end["lat"], seg_end["lng"]
         )
-        segments.append(_segment(start_node, end_node, expandable=same_shard))
+        segments.append(_segment(seg_start, seg_end, expandable=same_shard))
 
     return RouteResponse(
         path_found=True,
         segments=segments,
         summary=RouteSummary(segments_count=len(segments), distance_m=float(best_cost)),
+    )
+
+
+@app.post("/v1/route", response_model=RouteResponse)
+def route(request: RouteRequest) -> RouteResponse:
+    if overlay_graph is None:
+        raise HTTPException(status_code=500, detail="overlay_graph_not_loaded")
+
+    start_shard = shard_id_for_lat_lng(request.start.lat, request.start.lng)
+    end_shard = shard_id_for_lat_lng(request.end.lat, request.end.lng)
+
+    if start_shard == end_shard:
+        return _route_same_shard(
+            start_shard,
+            request.start.lat,
+            request.start.lng,
+            request.end.lat,
+            request.end.lng,
+        )
+
+    return _route_different_shards(
+        start_shard,
+        end_shard,
+        request.start.lat,
+        request.start.lng,
+        request.end.lat,
+        request.end.lng,
     )
 
 
