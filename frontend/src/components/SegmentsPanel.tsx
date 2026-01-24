@@ -9,7 +9,7 @@ type SegmentsPanelProps = {
 }
 
 function segmentKey(segment: Segment): string {
-  return `${segment.u.node_id}-${segment.v.node_id}`
+  return `${segment.start.node_id}-${segment.end.node_id}`
 }
 
 export default function SegmentsPanel({
@@ -41,13 +41,13 @@ export default function SegmentsPanel({
               </div>
               <div className="segment-detail">
                 <div>
-                  <strong>u</strong> {segment.u.lat.toFixed(5)}, {segment.u.lng.toFixed(5)}
+                  <strong>start</strong> {segment.start.lat.toFixed(5)}, {segment.start.lng.toFixed(5)}
                 </div>
                 <div>
-                  <strong>v</strong> {segment.v.lat.toFixed(5)}, {segment.v.lng.toFixed(5)}
+                  <strong>end</strong> {segment.end.lat.toFixed(5)}, {segment.end.lng.toFixed(5)}
                 </div>
                 <div className="segment-id">
-                  {segment.u.node_id} → {segment.v.node_id}
+                  {segment.start.node_id} → {segment.end.node_id}
                 </div>
               </div>
               <button

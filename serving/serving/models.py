@@ -16,21 +16,16 @@ class NodeRef(BaseModel):
     lng: float
 
 
-class SegmentRef(BaseModel):
-    u: NodeRef
-    v: NodeRef
-
-
 class Segment(BaseModel):
-    u: NodeRef
-    v: NodeRef
+    start: NodeRef
+    end: NodeRef
+    polyline: List[Coordinate]
     expandable: bool
 
 
-class ExpandedSegment(BaseModel):
-    u: NodeRef
-    v: NodeRef
-    polyline: List[Coordinate]
+class SegmentEndpoints(BaseModel):
+    start: NodeRef
+    end: NodeRef
 
 
 class RouteRequest(BaseModel):
@@ -50,9 +45,9 @@ class RouteResponse(BaseModel):
 
 
 class RouteExpandRequest(BaseModel):
-    segments: List[SegmentRef]
+    segments: List[SegmentEndpoints]
 
 
 class RouteExpandResponse(BaseModel):
-    expanded: List[ExpandedSegment]
+    segments: List[Segment]
     errors: List[dict]

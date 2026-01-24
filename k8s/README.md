@@ -34,5 +34,5 @@ Then expand returned segments:
 ```bash
 curl -s -X POST "$ROUTING_URL/v1/route/expand" \
   -H "Content-Type: application/json" \
-  -d '{"segments":[{"u":{"node_id":"8963866048","lat":52.22971,"lng":21.01218},"v":{"node_id":"8963866021","lat":52.22990,"lng":21.01280}}]}'
+  -d '{"segments":[{"start":{"node_id":"8963866048","lat":52.22971,"lng":21.01218},"end":{"node_id":"8963866021","lat":52.22990,"lng":21.01280}}]}'
 ```

@@ -4,7 +4,7 @@ import L from 'leaflet'
 import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png'
 import iconUrl from 'leaflet/dist/images/marker-icon.png'
 import shadowUrl from 'leaflet/dist/images/marker-shadow.png'
-import type { Coordinate, ExpandedSegment } from '../api/types'
+import type { Coordinate, Segment } from '../api/types'
 
 L.Icon.Default.mergeOptions({
   iconRetinaUrl,
@@ -21,7 +21,7 @@ type MapViewProps = {
   start: Coordinate | null
   end: Coordinate | null
   onMapClick: (point: Coordinate) => void
-  polylines: ExpandedSegment[]
+  polylines: Segment[]
 }
 
 function MapClickHandler({ onMapClick }: { onMapClick: (point: Coordinate) => void }) {
@@ -60,7 +60,7 @@ export default function MapView({
       {end && <Marker position={[end.lat, end.lng]} />}
       {polylines.map((segment) => (
         <Polyline
-          key={`${segment.u.node_id}-${segment.v.node_id}`}
+          key={`${segment.start.node_id}-${segment.end.node_id}`}
           positions={toLatLngs(segment.polyline)}
           pathOptions={{ color: '#2563eb', weight: 4 }}
         />

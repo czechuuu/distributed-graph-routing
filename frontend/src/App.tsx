@@ -4,7 +4,6 @@ import SegmentsPanel from './components/SegmentsPanel'
 import { expandSegments, fetchRoute } from './api/client'
 import type {
   Coordinate,
-  ExpandedSegment,
   RouteResponse,
   Segment,
 } from './api/types'
@@ -12,14 +11,14 @@ import type {
 const DEFAULT_CENTER: Coordinate = { lat: 52.2297, lng: 21.0122 }
 
 function segmentKey(segment: Segment): string {
-  return `${segment.u.node_id}-${segment.v.node_id}`
+  return `${segment.start.node_id}-${segment.end.node_id}`
 }
 
 function App() {
   const [start, setStart] = useState<Coordinate | null>(null)
   const [end, setEnd] = useState<Coordinate | null>(null)
   const [route, setRoute] = useState<RouteResponse | null>(null)
-  const [expanded, setExpanded] = useState<Record<string, ExpandedSegment>>({})
+  const [expanded, setExpanded] = useState<Record<string, Segment>>({})
   const [status, setStatus] = useState<string | null>(null)
   const [isRouting, setIsRouting] = useState(false)
   const [isExpanding, setIsExpanding] = useState<Record<string, boolean>>({})
@@ -92,7 +91,7 @@ function App() {
       setStatus(null)
       try {
         const response = await expandSegments([segment])
-        const expandedSegment = response.expanded[0]
+        const expandedSegment = response.segments[0]
         if (expandedSegment) {
           setExpanded((prev) => ({ ...prev, [key]: expandedSegment }))
         }
@@ -112,18 +111,7 @@ function App() {
   )
 
   const mapSegments = useMemo(
-    () =>
-      segments.map((segment) => {
-        const key = segmentKey(segment)
-        return expanded[key] ?? {
-          u: segment.u,
-          v: segment.v,
-          polyline: [
-            { lat: segment.u.lat, lng: segment.u.lng },
-            { lat: segment.v.lat, lng: segment.v.lng },
-          ],
-        }
-      }),
+    () => segments.map((segment) => expanded[segmentKey(segment)] ?? segment),
     [segments, expanded],
   )
 

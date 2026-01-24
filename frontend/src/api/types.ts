@@ -10,15 +10,10 @@ export type NodeRef = {
 }
 
 export type Segment = {
-  u: NodeRef
-  v: NodeRef
-  expandable: boolean
-}
-
-export type ExpandedSegment = {
-  u: NodeRef
-  v: NodeRef
+  start: NodeRef
+  end: NodeRef
   polyline: Coordinate[]
+  expandable: boolean
 }
 
 export type RouteSummary = {
@@ -38,7 +33,7 @@ export type RouteRequest = {
 }
 
 export type RouteExpandRequest = {
-  segments: Array<Pick<Segment, 'u' | 'v'>>
+  segments: Array<Pick<Segment, 'start' | 'end'>>
 }
 
 export type RouteExpandError = {
@@ -47,6 +42,6 @@ export type RouteExpandError = {
 }
 
 export type RouteExpandResponse = {
-  expanded: ExpandedSegment[]
+  segments: Segment[]
   errors: RouteExpandError[]
 }

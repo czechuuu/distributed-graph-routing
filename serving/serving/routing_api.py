@@ -10,7 +10,6 @@ from .dijkstra import multi_source_dijkstra, reconstruct_path
 from .gcs import download_overlay
 from .models import (
     Coordinate,
-    ExpandedSegment,
     RouteExpandRequest,
     RouteExpandResponse,
     RouteRequest,
@@ -34,11 +33,13 @@ def _node_ref(node_id: int, lat: float, lng: float) -> Dict[str, object]:
     return {"node_id": str(node_id), "lat": lat, "lng": lng}
 
 
-def _segment(u: Dict[str, object], v: Dict[str, object]) -> Segment:
-    same_shard = shard_id_for_lat_lng(u["lat"], u["lng"]) == shard_id_for_lat_lng(
-        v["lat"], v["lng"]
+def _segment(start: Dict[str, object], end: Dict[str, object], expandable: bool) -> Segment:
+    return Segment(
+        start=start,
+        end=end,
+        polyline=[Coordinate(lat=start["lat"], lng=start["lng"]), Coordinate(lat=end["lat"], lng=end["lng"])],
+        expandable=expandable,
     )
-    return Segment(u=u, v=v, expandable=same_shard)
 
 
 @app.on_event("startup")
@@ -116,11 +117,11 @@ def route(request: RouteRequest) -> RouteResponse:
             return RouteResponse(
                 path_found=False, segments=[], summary=RouteSummary(segments_count=0, distance_m=0)
             )
-        u = _node_ref(response.snapped.node_id, response.snapped.lat, response.snapped.lng)
-        v = _node_ref(end_resp.snapped.node_id, end_resp.snapped.lat, end_resp.snapped.lng)
+        start_node = _node_ref(response.snapped.node_id, response.snapped.lat, response.snapped.lng)
+        end_node = _node_ref(end_resp.snapped.node_id, end_resp.snapped.lat, end_resp.snapped.lng)
         return RouteResponse(
             path_found=True,
-            segments=[_segment(u, v)],
+            segments=[_segment(start_node, end_node, expandable=True)],
             summary=RouteSummary(segments_count=1, distance_m=float(expand.total_weight)),
         )
 
@@ -179,7 +180,12 @@ def route(request: RouteRequest) -> RouteResponse:
 
     segments: List[Segment] = []
     for i in range(len(nodes) - 1):
-        segments.append(_segment(nodes[i], nodes[i + 1]))
+        start_node = nodes[i]
+        end_node = nodes[i + 1]
+        same_shard = shard_id_for_lat_lng(start_node["lat"], start_node["lng"]) == shard_id_for_lat_lng(
+            end_node["lat"], end_node["lng"]
+        )
+        segments.append(_segment(start_node, end_node, expandable=same_shard))
 
     return RouteResponse(
         path_found=True,
@@ -195,24 +201,27 @@ def route_expand(request: RouteExpandRequest) -> RouteExpandResponse:
             status_code=400,
             detail={"code": "invalid_request", "message": "segments must be a non-empty array."},
         )
-    expanded: List[ExpandedSegment] = []
+    segments: List[Segment] = []
     errors: List[dict] = []
 
     for idx, segment in enumerate(request.segments):
-        u = segment.u
-        v = segment.v
-        shard_u = shard_id_for_lat_lng(u.lat, u.lng)
-        shard_v = shard_id_for_lat_lng(v.lat, v.lng)
-        if shard_u != shard_v:
-            expanded.append(
-                ExpandedSegment(
-                    u=u, v=v, polyline=[Coordinate(lat=u.lat, lng=u.lng), Coordinate(lat=v.lat, lng=v.lng)]
+        start = segment.start
+        end = segment.end
+        shard_start = shard_id_for_lat_lng(start.lat, start.lng)
+        shard_end = shard_id_for_lat_lng(end.lat, end.lng)
+        if shard_start != shard_end:
+            segments.append(
+                Segment(
+                    start=start,
+                    end=end,
+                    polyline=[Coordinate(lat=start.lat, lng=start.lng), Coordinate(lat=end.lat, lng=end.lng)],
+                    expandable=False,
                 )
             )
             continue
 
         try:
-            response = _expand_path(shard_u, int(u.node_id), int(v.node_id))
+            response = _expand_path(shard_start, int(start.node_id), int(end.node_id))
         except Exception as exc:
             errors.append({"index": idx, "error": str(exc)})
             continue
@@ -221,9 +230,11 @@ def route_expand(request: RouteExpandRequest) -> RouteExpandResponse:
             continue
 
         polyline = [Coordinate(lat=pt.lat, lng=pt.lng) for pt in response.polyline]
-        expanded.append(ExpandedSegment(u=u, v=v, polyline=polyline))
+        segments.append(
+            Segment(start=start, end=end, polyline=polyline, expandable=False)
+        )
 
-    return RouteExpandResponse(expanded=expanded, errors=errors)
+    return RouteExpandResponse(segments=segments, errors=errors)
 
 
 def main() -> None:

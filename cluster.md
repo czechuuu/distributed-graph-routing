@@ -51,10 +51,12 @@ b^* = \arg\min_{b \in BoundaryIn(endShard)} distOverlayFromStart[b] + dist_{in\_
 \]
 
 5. Reconstruct waypoint node IDs: `start_node_id -> ...boundary nodes... -> end_node_id`.
-6. Return `segments[]` as consecutive `NodeRef` pairs (`u`, `v`), `expandable=true` for same-shard segments.
+6. Return `segments[]` as consecutive `NodeRef` pairs (`start`, `end`).
+   - For unexpanded segments, set `polyline` to exactly `[start, end]`.
+   - Set `expandable=true` for same-shard segments (and `false` for cross-shard bridge segments).
 
 ### `POST /v1/route/expand`
-For each segment `(u: NodeRef, v: NodeRef)`:
-- compute shards from `u.lat/lng` and `v.lat/lng`
-- same shard: route to `W(shard)` and expand `u.node_id -> v.node_id` on `ShardGraph.edges`, returning `polyline`
-- different shards (bridge): return `polyline: [{lat: u.lat, lng: u.lng}, {lat: v.lat, lng: v.lng}]`
+For each segment `(start: NodeRef, end: NodeRef)`:
+- compute shards from `start.lat/lng` and `end.lat/lng`
+- same shard: route to `W(shard)` and expand `start.node_id -> end.node_id` on `ShardGraph.edges`, returning an expanded `polyline` and `expandable=false`
+- different shards (bridge): return an unexpanded segment with `polyline` set to `[start, end]` and `expandable=false`

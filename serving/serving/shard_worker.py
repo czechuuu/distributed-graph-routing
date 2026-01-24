@@ -73,13 +73,11 @@ class ShardWorkerService(shard_worker_pb2_grpc.ShardWorkerServicer):
             adjacency = shard.adjacency
 
         dists = dijkstra_targets(adjacency, node_id, targets)
-        dists_int = {key: int(round(value)) for key, value in dists.items()}
-
         return shard_worker_pb2.SnapAndBoundaryDistsResponse(
             ok=True,
             snapped=snapped,
             boundary_node_ids=list(targets),
-            dists=dists_int,
+            dists=dists,
         )
 
     def ExpandPath(self, request, context):
@@ -104,7 +102,7 @@ class ShardWorkerService(shard_worker_pb2_grpc.ShardWorkerServicer):
             polyline.append(shard_worker_pb2.Coordinate(lat=lat, lng=lng))
 
         return shard_worker_pb2.ExpandPathResponse(
-            ok=True, polyline=polyline, total_weight=int(round(total_weight))
+            ok=True, polyline=polyline, total_weight=total_weight
         )
 
     def Health(self, request, context):

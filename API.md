@@ -16,10 +16,10 @@ This document specifies a **minimal working** HTTP/JSON API between the frontend
 ## High-level contract
 
 - **Shards are invisible to the client**. All requests go to the Routing API.
-- **Segments are identified by their endpoint node IDs**: `(u.node_id, v.node_id)` (directional).
+- **Segments are identified by their endpoint node IDs**: `(start.node_id, end.node_id)` (directional).
 - The client only **draws what the backend returns**.
 - Clients MUST treat returned node IDs as opaque tokens and MUST NOT parse/rewrite them.
-- **Segment expansion is deterministic** for a given `(u.node_id, v.node_id)` pair.
+- **Segment expansion is deterministic** for a given `(start.node_id, end.node_id)` pair.
 
 ## Data types
 
@@ -56,50 +56,28 @@ Used only for inputs that are not yet snapped to a graph node.
 - `lat`: number, degrees (float64)
 - `lng`: number, degrees (float64)
 
-### SegmentRef
-
-The minimal reference used to identify a segment for expansion.
-
-Directional: `(u.node_id, v.node_id)` is distinct from `(v.node_id, u.node_id)`.
-
-```json
-{
-  "u": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
-  "v": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 }
-}
-```
-
 ### Segment
 
 ```json
 {
-  "u": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
-  "v": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
+  "start": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
+  "end": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
+  "polyline": [
+    { "lat": 52.22971, "lng": 21.01218 },
+    { "lat": 52.22990, "lng": 21.01280 }
+  ],
   "expandable": true
 }
 ```
 
-- `u`, `v`: `NodeRef` endpoints of this segment (also the segment identifier; also used for drawing and shard routing)
-- `expandable`: boolean
-
-### ExpandedSegment
-
-```json
-{
-  "u": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
-  "v": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
-  "polyline": [
-    { "lat": 52.22971, "lng": 21.01218 },
-    { "lat": 52.22975, "lng": 21.01230 },
-    { "lat": 52.22990, "lng": 21.01280 }
-  ]
-}
-```
-
-- `u`, `v`: the `NodeRef` endpoints being expanded
+- `start`, `end`: `NodeRef` endpoints of this segment (also the segment identifier; also used for drawing and shard routing)
 - `polyline`: array of `Coordinate`
-  - The first point SHOULD equal the segment’s `u` and the last point SHOULD equal `v`.
-  - Intermediate points represent the fully expanded path within that segment.
+  - Always present.
+  - If the segment has not been expanded yet, `polyline` MUST contain exactly two points: `[start, end]`.
+  - If the segment is expanded, intermediate points represent the fully expanded path within that segment.
+- `expandable`: boolean
+  - `true` means the client MAY request expansion for this segment (using `(start.node_id, end.node_id)`).
+  - When a segment is returned in expanded form, `expandable` MUST be `false` (even if `polyline` happens to have only two points).
 
 ## Endpoint: Compute route
 
@@ -123,8 +101,12 @@ Compute a route between two geographic points and return a compressed route as s
   "path_found": true,
   "segments": [
     {
-      "u": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
-      "v": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
+      "start": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
+      "end": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
+      "polyline": [
+        { "lat": 52.22971, "lng": 21.01218 },
+        { "lat": 52.22990, "lng": 21.01280 }
+      ],
       "expandable": true
     }
   ],
@@ -155,15 +137,16 @@ Compute a route between two geographic points and return a compressed route as s
 
 #### Semantics
 
-- Routing API MUST return `u.node_id` and `v.node_id` for every segment.
-- Clients MUST use the returned `(u.node_id, v.node_id)` pair as the identifier when requesting expansion.
-- The Routing API SHOULD return `u.lat/lng` and `v.lat/lng` consistent with the returned node IDs.
+- Routing API MUST return `start.node_id` and `end.node_id` for every segment.
+- Clients MUST use the returned `(start.node_id, end.node_id)` pair as the identifier when requesting expansion.
+- The Routing API SHOULD return `start.lat/lng` and `end.lat/lng` consistent with the returned node IDs.
+- For segments that are returned unexpanded, the Routing API MUST return `polyline` as `[start, end]` (two points).
 
 ## Endpoint: Expand segments (batch)
 
 ### `POST /v1/route/expand`
 
-Expand one or more segments by `(u.node_id, v.node_id)` endpoints. Client always uses the batch form (batch size may be 1).
+Expand one or more segments by `(start.node_id, end.node_id)` endpoints. Client always uses the batch form (batch size may be 1).
 
 #### Request
 
@@ -171,12 +154,12 @@ Expand one or more segments by `(u.node_id, v.node_id)` endpoints. Client always
 {
   "segments": [
     {
-      "u": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
-      "v": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 }
+      "start": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
+      "end": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 }
     },
     {
-      "u": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
-      "v": { "node_id": "8963867000", "lat": 52.23010, "lng": 21.01310 }
+      "start": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
+      "end": { "node_id": "8963867000", "lat": 52.23010, "lng": 21.01310 }
     }
   ]
 }
@@ -186,20 +169,27 @@ Expand one or more segments by `(u.node_id, v.node_id)` endpoints. Client always
 
 ```json
 {
-  "expanded": [
+  "segments": [
     {
-      "u": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
-      "v": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
+      "start": { "node_id": "8963866048", "lat": 52.22971, "lng": 21.01218 },
+      "end": { "node_id": "8963866021", "lat": 52.22990, "lng": 21.01280 },
       "polyline": [
         { "lat": 52.22971, "lng": 21.01218 },
         { "lat": 52.22975, "lng": 21.01230 },
         { "lat": 52.22990, "lng": 21.01280 }
-      ]
+      ],
+      "expandable": false
     }
   ],
   "errors": []
 }
 ```
+
+#### Semantics
+
+- The expansion key is the directional pair `(start.node_id, end.node_id)`.
+- Request `start.lat/lng` and `end.lat/lng` are included for shard routing and may be ignored for expansion lookup.
+- Clients SHOULD send the `start`/`end` objects exactly as returned by `POST /v1/route` for the corresponding segment.
 
 #### Error responses
 

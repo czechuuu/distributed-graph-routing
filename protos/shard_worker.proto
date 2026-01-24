@@ -30,7 +30,7 @@ message SnapAndBoundaryDistsResponse {
     string error = 2;
     NodeRef snapped = 3;
     repeated fixed64 boundary_node_ids = 4;
-    map<fixed64, uint32> dists = 5;
+    map<fixed64, double> dists = 5;
 }
 
 message ExpandPathRequest {
@@ -43,7 +43,7 @@ message ExpandPathResponse {
     bool ok = 1;
     string error = 2;
     repeated Coordinate polyline = 3;
-    uint32 total_weight = 4;
+    double total_weight = 4;
 }
 
 message HealthRequest {}

@@ -45,7 +45,10 @@ export function expandSegments(
   segments: Segment[],
 ): Promise<RouteExpandResponse> {
   const payload: RouteExpandRequest = {
-    segments: segments.map((segment) => ({ u: segment.u, v: segment.v })),
+    segments: segments.map((segment) => ({
+      start: segment.start,
+      end: segment.end,
+    })),
   }
   return fetchJson<RouteExpandResponse>('/v1/route/expand', {
     method: 'POST',
