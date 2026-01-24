@@ -1,0 +1,70 @@
+# Benchmark Test Cases Configuration
+# 
+# Categories:
+#   - small_town: Same-shard routing in small areas
+#   - large_city: Same-shard routing in large urban areas
+#   - cross_shard: Routes spanning multiple shards
+
+test_cases:
+  # ============================================================================
+  # Small Towns (Same Shard, Small Data)
+  # ============================================================================
+  - name: "Pabianice"
+    category: "small_town"
+    description: "Small town near Lodz, ~67k population"
+    start: {lat: 51.665, lng: 19.355}
+    end: {lat: 51.660, lng: 19.362}
+
+  - name: "Wieliczka"
+    category: "small_town"
+    description: "Small town near Krakow, famous salt mine"
+    start: {lat: 49.987, lng: 20.064}
+    end: {lat: 49.982, lng: 20.057}
+
+  - name: "Sopot"
+    category: "small_town"
+    description: "Resort town in Tri-City area"
+    start: {lat: 54.441, lng: 18.560}
+    end: {lat: 54.445, lng: 18.567}
+
+  # ============================================================================
+  # Large Cities (Same Shard, Large Data)
+  # ============================================================================
+  - name: "Warsaw-Central"
+    category: "large_city"
+    description: "Warsaw city center, capital, ~1.8M population"
+    start: {lat: 52.229, lng: 21.012}
+    end: {lat: 52.232, lng: 21.020}
+
+  - name: "Krakow-OldTown"
+    category: "large_city"
+    description: "Krakow historical center"
+    start: {lat: 50.061, lng: 19.937}
+    end: {lat: 50.058, lng: 19.945}
+
+  - name: "Wroclaw-Center"
+    category: "large_city"
+    description: "Wroclaw city center"
+    start: {lat: 51.109, lng: 17.032}
+    end: {lat: 51.105, lng: 17.040}
+
+  # ============================================================================
+  # Cross-Shard Routes (Different Shards)
+  # ============================================================================
+  - name: "Warsaw-Gdansk"
+    category: "cross_shard"
+    description: "~340km route between capital and Baltic coast"
+    start: {lat: 52.229, lng: 21.012}
+    end: {lat: 54.352, lng: 18.647}
+
+  - name: "Krakow-Wroclaw"
+    category: "cross_shard"
+    description: "~270km route between two major cities"
+    start: {lat: 50.061, lng: 19.937}
+    end: {lat: 51.109, lng: 17.032}
+
+  - name: "Poznan-Lodz"
+    category: "cross_shard"
+    description: "~200km route in central Poland"
+    start: {lat: 52.406, lng: 16.925}
+    end: {lat: 51.759, lng: 19.456}
