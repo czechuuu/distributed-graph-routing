@@ -106,7 +106,7 @@ def _route_same_shard(
 
     try:
         expand = _expand_path(
-            shard_id, start_resp.snapped.node_id, end_resp.snapped.node_id
+            shard_id, start_resp.snapped.node_id, end_resp.snapped.node_id # we already have it expanded here
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -118,9 +118,10 @@ def _route_same_shard(
 
     start_node = _node_ref(start_resp.snapped.node_id, start_resp.snapped.lat, start_resp.snapped.lng)
     end_node = _node_ref(end_resp.snapped.node_id, end_resp.snapped.lat, end_resp.snapped.lng)
+    polyline = [Coordinate(lat=pt.lat, lng=pt.lng) for pt in expand.polyline]
     return RouteResponse(
         path_found=True,
-        segments=[_segment(start_node, end_node, expandable=True)],
+        segments=[Segment(start=start_node, end=end_node, polyline=polyline, expandable=False)],
         summary=RouteSummary(segments_count=1, distance_m=float(expand.total_weight)),
     )
 
