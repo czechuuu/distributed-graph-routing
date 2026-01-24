@@ -6,7 +6,7 @@ from typing import Dict, List
 from fastapi import FastAPI, HTTPException
 
 from .config import load_routing_api_config
-from .dijkstra import multi_source_dijkstra, reconstruct_path
+from .dijkstra import bidirectional_multi_source_dijkstra, reconstruct_bidirectional_path
 from .gcs import download_overlay
 from .models import (
     Coordinate,
@@ -159,24 +159,21 @@ def _route_different_shards(
     dist_start_to_out = {int(k): float(v) for k, v in start_resp.dists.items()}
     dist_in_to_end = {int(k): float(v) for k, v in end_resp.dists.items()}
 
-    distances, prev = multi_source_dijkstra(overlay_graph.adjacency, dist_start_to_out)
-    best_boundary = None
-    best_cost = math.inf
-    for node_id in end_resp.boundary_node_ids:
-        node_id = int(node_id)
-        cost = distances.get(node_id, math.inf) + dist_in_to_end.get(node_id, math.inf)
-        if cost < best_cost:
-            best_cost = cost
-            best_boundary = node_id
+    meeting, best_cost, prev_fwd, prev_bwd = bidirectional_multi_source_dijkstra(
+        overlay_graph.adjacency,
+        overlay_graph.rev_adjacency,
+        dist_start_to_out,
+        dist_in_to_end,
+    )
 
-    if best_boundary is None or best_cost == math.inf:
+    if meeting is None:
         return RouteResponse(
             path_found=False,
             segments=[],
             summary=RouteSummary(segments_count=0, distance_m=0),
         )
 
-    overlay_path = reconstruct_path(prev, best_boundary)
+    overlay_path = reconstruct_bidirectional_path(meeting, prev_fwd, prev_bwd)
     nodes: List[Dict[str, object]] = []
     start_node = _node_ref(start_resp.snapped.node_id, start_resp.snapped.lat, start_resp.snapped.lng)
     nodes.append(start_node)
