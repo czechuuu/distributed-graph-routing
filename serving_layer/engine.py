@@ -46,6 +46,13 @@ def unpack_path(path_nodes: List[int], facade: GraphFacade) -> List[int]:
 
     # Add the first node
     full_path.append(path_nodes[0])
+
+    # Pre-fetch expansions for all edges in the path
+    edges = []
+    for i in range(len(path_nodes) - 1):
+        edges.append((path_nodes[i], path_nodes[i+1]))
+    
+    facade.get_expansions_batch(edges)
     
     for i in range(len(path_nodes) - 1):
         u = path_nodes[i]

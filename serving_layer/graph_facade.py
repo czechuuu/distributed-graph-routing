@@ -1,6 +1,7 @@
 import logging
 import networkx as nx
 from typing import Dict, List, Tuple
+import concurrent.futures
 
 logger = logging.getLogger("GraphFacade")
 
@@ -13,6 +14,8 @@ except ImportError:
     logger.warning("google-cloud-bigtable not installed.")
 
 from serving_layer.storage_types import bigtable_storage_pb2
+
+BATCH_SIZE = 1000
 
 class GraphFacade:
     def __init__(self, project_id: str, instance_id: str, overlay_table_id: str, shortcuts_table_id: str, intra_table_id: str, node_index_table_id: str, use_mock: bool = False):
@@ -54,9 +57,9 @@ class GraphFacade:
                 # Load shortcuts (only topology)
                 for edge in overlay_pb.shortcuts:
                     u, v, w = edge.from_node_id, edge.to_node_id, edge.weight
-                    self.overlay.add_edge(u, v, weight=w)
+                    self.overlay.add_edge(u, v, weight=w, is_shortcut=True)
                     if edge.bidirectional:
-                        self.overlay.add_edge(v, u, weight=w)
+                        self.overlay.add_edge(v, u, weight=w, is_shortcut=True)
 
                 # Load bridges
                 for edge in overlay_pb.bridges:
@@ -66,6 +69,12 @@ class GraphFacade:
             
         except Exception as e:
             logger.error(f"Error loading Overlay: {e}")
+
+    def is_shortcut(self, u: int, v: int) -> bool:
+        """Checks if an edge is marked as a shortcut in the overlay."""
+        if self.overlay.has_edge(u, v):
+            return self.overlay[u][v].get('is_shortcut', False)
+        return False
 
     def get_query_graph(self, start_node: int, end_node: int, node_to_shard: Dict[int, int]) -> nx.DiGraph:
         query_graph = self.overlay.copy()
@@ -109,6 +118,9 @@ class GraphFacade:
         except Exception as e:
             logger.warning(f"Failed to load shard {shard_id}: {e}")
 
+
+
+
     def prefetch_coords(self, node_ids: List[int]):
         """
         Prefetches coordinates for missing nodes. 
@@ -121,24 +133,104 @@ class GraphFacade:
         if not missing_nodes:
             return
             
-        try:
-            # Look up Node Index (get NodeLocation)
-            node_rowset = RowSet()
-            for n in missing_nodes:
-                node_rowset.add_row_key(f"N#{n}".encode('utf-8'))
+        # Chunking configuration
+        chunks = [missing_nodes[i:i + BATCH_SIZE] for i in range(0, len(missing_nodes), BATCH_SIZE)]
+        
+        def fetch_chunk(chunk):
+            chunk_results = {}
+            try:
+                node_rowset = RowSet()
+                for n in chunk:
+                    node_rowset.add_row_key(f"N#{n}".encode('utf-8'))
+                    
+                rows = self.node_index_table.read_rows(row_set=node_rowset)
                 
-            rows = self.node_index_table.read_rows(row_set=node_rowset)
-            
-            for row in rows:
-                # Try to get coordinates directly
-                loc_cell = row.cells.get('cf', {}).get(b'loc', [])
-                if loc_cell:
-                    loc_pb = bigtable_storage_pb2.NodeLocation()
-                    loc_pb.ParseFromString(loc_cell[0].value)
-                    self.node_coord_cache[loc_pb.node_id] = (loc_pb.x, loc_pb.y)
+                for row in rows:
+                    loc_cell = row.cells.get('cf', {}).get(b'loc', [])
+                    if loc_cell:
+                        loc_pb = bigtable_storage_pb2.NodeLocation()
+                        loc_pb.ParseFromString(loc_cell[0].value)
+                        chunk_results[loc_pb.node_id] = (loc_pb.x, loc_pb.y)
+            except Exception as e:
+                logger.error(f"Error fetching chunk: {e}")
+            return chunk_results
+
+        logger.info(f"Fetching {len(missing_nodes)} missing coords in {len(chunks)} parallel chunks...")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_chunk = {executor.submit(fetch_chunk, chunk): chunk for chunk in chunks}
+            for future in concurrent.futures.as_completed(future_to_chunk):
+                try:
+                    chunk_data = future.result()
+                    self.node_coord_cache.update(chunk_data)
+                except Exception as e:
+                    logger.error(f"Chunk fetch failed: {e}")
+
+    def get_expansions_batch(self, edges: List[Tuple[int, int]]) -> Dict[Tuple[int, int], List[int]]:
+        """
+        Fetches expansion paths for a batch of shortcuts.
+        Checks cache first, then fetches missing ones from Bigtable in parallel chunks.
+        """
+        results = {}
+        missing_edges = []
+
+        # Check cache
+        for u, v in edges:
+            if (u, v) in self.shortcut_cache:
+                results[(u, v)] = self.shortcut_cache[(u, v)]
+            else:
+                # Optimized check: Only fetch if it's actually marked as a shortcut
+                if self.is_shortcut(u, v):
+                    missing_edges.append((u, v))
+
+        if not missing_edges:
+            return results
+
+        if self.use_mock:
+            return results
+
+        chunks = [missing_edges[i:i + BATCH_SIZE] for i in range(0, len(missing_edges), BATCH_SIZE)]
+        
+        def fetch_chunk(chunk):
+            chunk_results = {}
+            try:
+                row_set = RowSet()
+                for u, v in chunk:
+                    row_key = f"P#{u}#{v}".encode('utf-8')
+                    row_set.add_row_key(row_key)
+                
+                rows = self.shortcuts_table.read_rows(row_set=row_set)
+                
+                for row in rows:
+                    key = row.row_key.decode('utf-8')
+                    parts = key.split('#')
+                    if len(parts) == 3:
+                        u, v = int(parts[1]), int(parts[2])
                         
-        except Exception as e:
-            logger.error(f"Error in prefetch_coords: {e}")
+                        cell = row.cells.get('cf', {}).get(b'val', [])
+                        if cell:
+                            path_proto = bigtable_storage_pb2.ShortcutPath()
+                            path_proto.ParseFromString(cell[0].value)
+                            path = list(path_proto.nodes)
+                            chunk_results[(u, v)] = path
+            except Exception as e:
+                logger.warning(f"Failed to fetch chunk: {e}")
+            return chunk_results
+
+        logger.info(f"Fetching {len(missing_edges)} shortcuts in {len(chunks)} parallel chunks...")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_chunk = {executor.submit(fetch_chunk, chunk): chunk for chunk in chunks}
+            for future in concurrent.futures.as_completed(future_to_chunk):
+                try:
+                    chunk_data = future.result()
+                    for k, v in chunk_data.items():
+                        self.shortcut_cache[k] = v
+                        results[k] = v
+                except Exception as e:
+                    logger.error(f"Chunk fetch failed: {e}")
+            
+        return results
 
     def get_expansion(self, u: int, v: int) -> List[int]:
         """
@@ -148,6 +240,10 @@ class GraphFacade:
         # Check cache
         if (u, v) in self.shortcut_cache:
             return self.shortcut_cache[(u, v)]
+        
+        # Optimization: Don't check Bigtable if it's not a shortcut
+        if not self.is_shortcut(u, v):
+            return []
 
         # Fetch from Bigtable
         if self.use_mock: 
