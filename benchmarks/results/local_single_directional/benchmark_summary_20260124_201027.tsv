@@ -1,0 +1,11 @@
+# Benchmark Summary Results - 2026-01-24T20:10:27.101226
+# URL: http://0.0.0.0:8080
+# Runs per test: 1
+#
+CATEGORY	TEST_NAME	QUERY_TYPE	COUNT	SUCCESS	MEAN_MS	STD_MS	MIN_MS	MAX_MS	MEDIAN_MS	P95_MS	AVG_DIST_M
+large_city	Krakow-OldTown	cached	1	1	632.26	0.00	632.26	632.26	632.26	632.26	0.00
+large_city	Krakow-OldTown	first	1	1	8129.33	0.00	8129.33	8129.33	8129.33	8129.33	0.00
+large_city	Warsaw-Central	cached	1	1	1814.52	0.00	1814.52	1814.52	1814.52	1814.52	1087.00
+large_city	Warsaw-Central	first	1	1	10719.67	0.00	10719.67	10719.67	10719.67	10719.67	1087.00
+large_city	Wroclaw-Center	cached	1	1	796.07	0.00	796.07	796.07	796.07	796.07	2346.00
+large_city	Wroclaw-Center	first	1	1	7253.03	0.00	7253.03	7253.03	7253.03	7253.03	2346.00
