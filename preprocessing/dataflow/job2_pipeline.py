@@ -12,7 +12,7 @@ from apache_beam.io.parquetio import ReadFromParquet
 from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
 
 from .io_wrappers import WriteBytesByDestination
-from .storage_types import gcs_storage_pb2
+from shared.protos import gcs_storage_pb2
 
 _SHARD_RE = re.compile(r"/shard_id=(\d+)/")
 

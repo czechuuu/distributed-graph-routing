@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "dgr-shared",
     "apache-beam[gcp]>=2.70.0",
     "build>=1.4.0",
     "functions-framework>=3.10.0",
@@ -16,3 +17,6 @@ dependencies = [
     "crcmod",
     "s2sphere>=0.2.5",
 ]
+
+[tool.uv.sources]
+dgr-shared = { workspace = true }

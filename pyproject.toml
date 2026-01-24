@@ -1,0 +1,18 @@
+[project]
+name = "distributed-graph-routing"
+version = "0.0.0"
+description = "Workspace for distributed graph routing"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+  "preprocessing",
+  "serving",
+  "scripts",
+  "shared",
+]
+

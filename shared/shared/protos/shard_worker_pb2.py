@@ -46,3 +46,4 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SHARDWORKER']._serialized_start=756
   _globals['_SHARDWORKER']._serialized_end=1000
 # @@protoc_insertion_point(module_scope)
+

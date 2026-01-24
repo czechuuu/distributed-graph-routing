@@ -3,7 +3,7 @@
 This document describes the minimal serving cluster that matches [`API.md`](API.md).
 
 ## GCS inputs (protobuf)
-Schema: [`protos/bigtable_storage.proto`](protos/bigtable_storage.proto)
+Schema: [`protos/gcs_storage.proto`](protos/gcs_storage.proto)
 
 - `gs://<bucket>/protos/overlay_graph.pb`
   - `bridges`: cross-shard edges

@@ -5,6 +5,7 @@ description = "Serving layer for routing API and shard workers"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "dgr-shared",
     "fastapi>=0.111.0",
     "grpcio>=1.65.5",
     "grpcio-tools>=1.65.5",
@@ -23,3 +24,6 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.uv.sources]
+dgr-shared = { workspace = true }
