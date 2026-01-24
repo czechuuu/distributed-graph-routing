@@ -3,13 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
-from .dijkstra import Adjacency
+from .dijkstra import Adjacency, reverse_adjacency
 from .storage_types import gcs_storage_pb2
 
 
 @dataclass(frozen=True)
 class OverlayGraphData:
     adjacency: Adjacency
+    rev_adjacency: Adjacency
     boundary_locations: Dict[int, Tuple[float, float]]
 
 
@@ -25,4 +26,9 @@ def parse_overlay(payload: bytes) -> OverlayGraphData:
     for loc in overlay_pb.boundary_locations:
         boundary_locations[loc.node_id] = (loc.y, loc.x)
 
-    return OverlayGraphData(adjacency=adjacency, boundary_locations=boundary_locations)
+    return OverlayGraphData(
+        adjacency=adjacency,
+        rev_adjacency=reverse_adjacency(adjacency),
+        boundary_locations=boundary_locations,
+    )
+
