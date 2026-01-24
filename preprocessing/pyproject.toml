@@ -11,7 +11,6 @@ dependencies = [
     "functions-framework>=3.10.0",
     "google-cloud-bigquery>=3.40.0",
     "google-cloud-bigtable>=2.35.0",
-    "grpcio-tools>=1.65.5",
     "igraph>=0.11.0",
     "pip",
     "crcmod",

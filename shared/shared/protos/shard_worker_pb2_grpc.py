@@ -186,4 +186,3 @@ class ShardWorker(object):
             timeout,
             metadata,
             _registered_method=True)
-
