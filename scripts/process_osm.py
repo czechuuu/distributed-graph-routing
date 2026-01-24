@@ -2,7 +2,7 @@
 """
 Memory-efficient OSM processing script for large regions.
 
-This script downloads OSM data from Geofabrik and processes it using pyosmium
+This script downloads OSM data from Geofabrik and processes it using osmium
 for streaming (constant memory usage regardless of file size).
 
 Usage:

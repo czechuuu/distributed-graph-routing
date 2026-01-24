@@ -1559,6 +1559,7 @@ dependencies = [
     { name = "google-cloud-bigquery" },
     { name = "google-cloud-bigtable" },
     { name = "igraph" },
+    { name = "osmium" },
     { name = "pip" },
     { name = "s2sphere" },
 ]
@@ -1573,6 +1574,7 @@ requires-dist = [
     { name = "google-cloud-bigquery", specifier = ">=3.40.0" },
     { name = "google-cloud-bigtable", specifier = ">=2.35.0" },
     { name = "igraph", specifier = ">=0.11.0" },
+    { name = "osmium", specifier = ">=4.0.0" },
     { name = "pip" },
     { name = "s2sphere", specifier = ">=0.2.5" },
 ]

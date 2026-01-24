@@ -45,11 +45,29 @@ You can override the source bucket and output bucket with:
 
 ### Job 0 Dataflow worker container
 
-Job 0 parses `.osm.pbf` files using `pyosmium`, which requires native `libosmium` libraries. Run Job 0 with a custom Dataflow SDK container image that includes `pyosmium` and its native deps.
+Job 0 parses `.osm.pbf` files using Python bindings `osmium`, which requires native `libosmium` libraries. Run Job 0 with a custom Dataflow SDK container image that includes `osmium` and its native deps.
 
 Example outline:
-1. Build a custom image based on the Beam Python SDK image that installs `pyosmium` and system packages (`libosmium`, `zlib`, etc.).
+1. Build a custom image based on the Beam Python SDK image that installs `osmium` and system packages (`libosmium`, `zlib`, etc.).
 2. Pass it via `--sdk_container_image=...` when running Job 0.
+
+## Local tiling script (PBF -> osm_tiles)
+
+Use the tiler to download a Geofabrik extract (or use a local PBF) and split into
+overlapping tiles sized for Job 0.
+
+```bash
+cd ../scripts
+uv run tile_osm_pbf.py london \
+  --output-dir ./osm_tiles \
+  --tile-size-deg 0.5 \
+  --overlap-km 2 \
+  --max-tile-mb 500
+```
+
+Notes:
+- Use `--local /path/to/file.osm.pbf` to avoid downloading.
+- If the PBF header has no bounds, pass `--bbox=min_lat,min_lon,max_lat,max_lon`.
 
 ## Architecture (Job 1)
 
