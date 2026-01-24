@@ -1,11 +1,11 @@
 # GKE (zonal) tutorial for this repo
 
-This is a *clean* “run these commands in order” guide based on commands that have worked in this project.
+This is a *clean* "run these commands in order" guide based on commands that have worked in this project.
 
 Assumptions from `k8s/` manifests:
 - A GCS bucket contains `overlay_graph.pb` and `shard_graph.pb` files (see `cluster.md`).
 - Pods use a mounted service-account JSON key at `/var/secrets/google/key.json` (K8s Secret `gcp-sa-key`).
-- Deployments are updated to use images pushed to Artifact Registry.
+- Images are pushed to Google Artifact Registry.
 
 ## 0) Pick names / set variables
 
@@ -92,34 +92,50 @@ gcloud artifacts repositories create "$REPO" \
 gcloud auth configure-docker "$REGION-docker.pkg.dev"
 ```
 
-## 7) Build + push images (run from repo root)
+---
+
+## 7) Build, push, and deploy (unified workflow)
+
+This same workflow works for **both initial deploy and updates**. Run from repo root:
+
+> ⚠️ **IMPORTANT**: You must **commit your changes** before deploying. The image tag is derived
+> from the git commit SHA. If you have uncommitted changes:
+> - The Docker image will contain your changes
+> - But the tag will be the *old* commit SHA
+> - Kubernetes won't detect a change and **won't trigger a rollout**
+>
+> Always commit first: `git add . && git commit -m "your message"`
 
 ```bash
+# Set the image tag to the current git commit
 TAG="$(git rev-parse --short HEAD)"
 
+# Build images
 docker build -f serving/Dockerfile.routing-api \
   -t "$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG" .
 
 docker build -f serving/Dockerfile.shard-worker \
   -t "$REGION-docker.pkg.dev/$PROJECT/$REPO/shard-worker:$TAG" .
 
+# Push to Artifact Registry
 docker push "$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG"
 docker push "$REGION-docker.pkg.dev/$PROJECT/$REPO/shard-worker:$TAG"
-```
 
-## 8) Deploy Kubernetes manifests, then point Deployments at pushed images
-
-```bash
-kubectl apply -k k8s
-
-kubectl set image deployment/routing-api \
-  routing-api="$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG"
-
-kubectl set image deployment/shard-worker \
+# Update kustomization.yaml with new image tags
+cd k8s
+kustomize edit set image \
+  routing-api="$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG" \
   shard-worker="$REGION-docker.pkg.dev/$PROJECT/$REPO/shard-worker:$TAG"
+
+# Deploy to Kubernetes
+kubectl apply -k .
 ```
 
-## 9) Wait for rollout + get external endpoint
+> **How it works**: Kustomize rewrites the image references before applying. Since the tag
+> changes with each commit, Kubernetes detects the spec change and performs a rolling update
+> automatically—no manual restart needed.
+
+## 8) Wait for rollout + get external endpoint
 
 ```bash
 kubectl rollout status deploy/routing-api
@@ -128,7 +144,7 @@ kubectl rollout status deploy/shard-worker
 kubectl get svc routing-api
 ```
 
-## 10) Smoke test the public API
+## 9) Smoke test the public API
 
 ```bash
 ROUTING_URL="http://<external-ip>"
@@ -138,7 +154,53 @@ curl -s -X POST "$ROUTING_URL/v1/route" \
   -d '{"start":{"lat":52.2297,"lng":21.0122},"end":{"lat":52.2400,"lng":21.0300}}'
 ```
 
-## Debugging (if pods don’t become Ready)
+---
+
+## Updating with new code
+
+When you modify the code and want to deploy updates, simply re-run **step 7**. The workflow is identical:
+
+```bash
+TAG="$(git rev-parse --short HEAD)"
+
+# Build and push
+docker build -f serving/Dockerfile.routing-api \
+  -t "$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG" .
+docker build -f serving/Dockerfile.shard-worker \
+  -t "$REGION-docker.pkg.dev/$PROJECT/$REPO/shard-worker:$TAG" .
+
+docker push "$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG"
+docker push "$REGION-docker.pkg.dev/$PROJECT/$REPO/shard-worker:$TAG"
+
+# Update image tags and deploy
+cd k8s
+kustomize edit set image \
+  routing-api="$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG" \
+  shard-worker="$REGION-docker.pkg.dev/$PROJECT/$REPO/shard-worker:$TAG"
+
+kubectl apply -k .
+
+# Wait for rollout
+kubectl rollout status deploy/routing-api deploy/shard-worker
+```
+
+### Rolling back
+
+To rollback to a previous version:
+
+```bash
+# Option 1: Kubernetes native rollback (previous version)
+kubectl rollout undo deploy/routing-api
+kubectl rollout undo deploy/shard-worker
+
+# Option 2: Deploy a specific older commit
+git checkout <old-commit>
+# Then run the build/push/deploy workflow above
+```
+
+---
+
+## Debugging (if pods don't become Ready)
 
 ```bash
 kubectl get pods -o wide
@@ -147,3 +209,37 @@ kubectl logs deploy/shard-worker --tail=200
 kubectl describe pod -l app=routing-api
 kubectl describe pod -l app=shard-worker
 ```
+
+---
+
+## Deleting the cluster (to avoid billing)
+
+> **IMPORTANT**: GKE clusters incur charges for compute nodes, load balancer IPs, and persistent
+> disks. Delete the cluster when not in use to avoid unexpected bills.
+
+### Delete just the cluster (keeps Artifact Registry images)
+
+```bash
+gcloud container clusters delete "$CLUSTER" --zone "$ZONE" --quiet
+```
+
+This deletes:
+- All nodes and pods
+- The LoadBalancer external IP
+- Associated compute resources
+
+### Cost-saving alternative: Scale to zero nodes
+
+If you want to keep the cluster configuration but stop paying for compute:
+
+```bash
+# Scale node pool to zero (stops compute charges, keeps cluster config)
+gcloud container clusters resize "$CLUSTER" --zone "$ZONE" --num-nodes 0 --quiet
+
+# Later, scale back up
+gcloud container clusters resize "$CLUSTER" --zone "$ZONE" --num-nodes 2 --quiet
+```
+
+> **Note**: Even with zero nodes, you may still incur minimal charges for the cluster
+> management fee (~$0.10/hour for standard clusters). For complete cost elimination,
+> delete the cluster entirely.
