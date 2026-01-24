@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: routing-config
+data:
+  GCS_BUCKET: "rsp_graph_data_test"
+  GCS_PREFIX: "protos"
+  WORKER_SERVICE_HOST: "shard-worker.default.svc.cluster.local"
+  WORKER_SERVICE_PORT: "50051"

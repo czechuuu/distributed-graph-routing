@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package routing;
+
+message Coordinate {
+    double lat = 1;
+    double lng = 2;
+}
+
+message NodeRef {
+    fixed64 node_id = 1;
+    double lat = 2;
+    double lng = 3;
+}
+
+enum BoundaryMode {
+    BOUNDARY_OUT = 0;
+    BOUNDARY_IN = 1;
+}
+
+message SnapAndBoundaryDistsRequest {
+    fixed64 shard_id = 1;
+    double lat = 2;
+    double lng = 3;
+    BoundaryMode mode = 4;
+}
+
+message SnapAndBoundaryDistsResponse {
+    bool ok = 1;
+    string error = 2;
+    NodeRef snapped = 3;
+    repeated fixed64 boundary_node_ids = 4;
+    map<fixed64, double> dists = 5;
+}
+
+message ExpandPathRequest {
+    fixed64 shard_id = 1;
+    fixed64 u_node_id = 2;
+    fixed64 v_node_id = 3;
+}
+
+message ExpandPathResponse {
+    bool ok = 1;
+    string error = 2;
+    repeated Coordinate polyline = 3;
+    double total_weight = 4;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+    bool ok = 1;
+}
+
+service ShardWorker {
+    rpc SnapAndBoundaryDists(SnapAndBoundaryDistsRequest) returns (SnapAndBoundaryDistsResponse);
+    rpc ExpandPath(ExpandPathRequest) returns (ExpandPathResponse);
+    rpc Health(HealthRequest) returns (HealthResponse);
+}

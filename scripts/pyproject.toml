@@ -1,0 +1,17 @@
+[project]
+name = "osm-scripts"
+version = "0.1.0"
+description = "Scripts for downloading and processing OpenStreetMap data"
+requires-python = ">=3.11"
+dependencies = [
+    "google-cloud-bigtable>=2.35.0",
+    "google-cloud-storage>=2.18.0",
+    "grpcio-tools",
+    "igraph",
+    "osmium>=4.0.0",
+    "pyarrow>=17.0.0",
+    "protobuf",
+]
+
+[tool.uv]
+package = false

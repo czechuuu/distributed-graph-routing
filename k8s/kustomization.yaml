@@ -1,0 +1,11 @@
+resources:
+  - configmap.yaml
+  - gcp-sa-key-secret.yaml
+  - routing-api-deployment.yaml
+  - routing-api-service.yaml
+  - routing-api-hpa.yaml
+  - routing-api-pdb.yaml
+  - shard-worker-deployment.yaml
+  - shard-worker-service.yaml
+  - shard-worker-hpa.yaml
+  - shard-worker-pdb.yaml

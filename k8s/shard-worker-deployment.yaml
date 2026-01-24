@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shard-worker
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: shard-worker
+  template:
+    metadata:
+      labels:
+        app: shard-worker
+    spec:
+      containers:
+        - name: shard-worker
+          image: shard-worker:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50051
+            - containerPort: 8081
+          env:
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /var/secrets/google/key.json
+            - name: SHARD_WORKER_PORT
+              value: "50051"
+            - name: SHARD_WORKER_HEALTH_PORT
+              value: "8081"
+            - name: MAX_CACHED_SHARDS
+              value: "64"
+          envFrom:
+            - configMapRef:
+                name: routing-config
+          volumeMounts:
+            - name: gcp-sa-key
+              mountPath: /var/secrets/google
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+      volumes:
+        - name: gcp-sa-key
+          secret:
+            secretName: gcp-sa-key
