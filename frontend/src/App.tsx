@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import MapView from './components/MapView'
-import SegmentsPanel from './components/SegmentsPanel'
+import FloatingSearchBar, { type PinMode } from './components/FloatingSearchBar'
 import { expandSegments, fetchRoute } from './api/client'
 import type {
   Coordinate,
@@ -10,67 +10,90 @@ import type {
 
 const DEFAULT_CENTER: Coordinate = { lat: 52.2297, lng: 21.0122 }
 
+type LocationValue = {
+  coord: Coordinate
+  label: string
+}
+
 function segmentKey(segment: Segment): string {
   return `${segment.start.node_id}-${segment.end.node_id}`
 }
 
 function App() {
-  const [start, setStart] = useState<Coordinate | null>(null)
-  const [end, setEnd] = useState<Coordinate | null>(null)
+  const [source, setSource] = useState<LocationValue | null>(null)
+  const [destination, setDestination] = useState<LocationValue | null>(null)
   const [route, setRoute] = useState<RouteResponse | null>(null)
   const [expanded, setExpanded] = useState<Record<string, Segment>>({})
   const [status, setStatus] = useState<string | null>(null)
   const [isRouting, setIsRouting] = useState(false)
-  const [isExpanding, setIsExpanding] = useState<Record<string, boolean>>({})
+  const [pinMode, setPinMode] = useState<PinMode>(null)
 
   const segments = route?.segments ?? []
-  const hasRoute = Boolean(route?.path_found)
 
-  const handleReset = useCallback(() => {
-    setStart(null)
-    setEnd(null)
+  const handleClear = useCallback(() => {
+    setSource(null)
+    setDestination(null)
     setRoute(null)
     setExpanded({})
     setStatus(null)
+    setPinMode(null)
   }, [])
 
   const handleMapClick = useCallback(
     (point: Coordinate) => {
-      if (!start) {
-        setStart(point)
+      if (pinMode === 'source') {
+        setSource({ coord: point, label: `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` })
+        setPinMode(null)
         setRoute(null)
         setExpanded({})
         setStatus(null)
-        return
-      }
-      if (!end) {
-        setEnd(point)
+      } else if (pinMode === 'dest') {
+        setDestination({ coord: point, label: `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` })
+        setPinMode(null)
         setRoute(null)
         setExpanded({})
         setStatus(null)
-        return
       }
-      setStart(point)
-      setEnd(null)
-      setRoute(null)
-      setExpanded({})
-      setStatus(null)
     },
-    [start, end],
+    [pinMode],
   )
 
   const handleRoute = useCallback(async () => {
-    if (!start || !end) {
+    if (!source || !destination) {
       return
     }
     setIsRouting(true)
     setStatus(null)
     try {
-      const response = await fetchRoute({ start, end })
+      const response = await fetchRoute({ start: source.coord, end: destination.coord })
       setRoute(response)
       setExpanded({})
       if (!response.path_found) {
         setStatus('No route found for the selected points.')
+        return
+      }
+
+      // Auto-expand all expandable segments
+      const expandable = response.segments.filter((s) => s.expandable)
+      if (expandable.length > 0) {
+        try {
+          const expandResponse = await expandSegments(expandable)
+          const newExpanded: Record<string, Segment> = {}
+          expandable.forEach((original, idx) => {
+            const exp = expandResponse.segments[idx]
+            if (exp) {
+              newExpanded[segmentKey(original)] = exp
+            }
+          })
+          setExpanded(newExpanded)
+
+          if (expandResponse.errors.length > 0) {
+            const failedCount = expandResponse.errors.length
+            setStatus(`${failedCount} segment(s) could not be expanded.`)
+          }
+        } catch (expandError) {
+          setStatus(expandError instanceof Error ? expandError.message : 'Expansion failed.')
+        }
       }
     } catch (error) {
       setRoute(null)
@@ -79,105 +102,46 @@ function App() {
     } finally {
       setIsRouting(false)
     }
-  }, [start, end])
-
-  const handleExpand = useCallback(
-    async (segment: Segment) => {
-      const key = segmentKey(segment)
-      if (!segment.expandable || expanded[key]) {
-        return
-      }
-      setIsExpanding((prev) => ({ ...prev, [key]: true }))
-      setStatus(null)
-      try {
-        const response = await expandSegments([segment])
-        const expandedSegment = response.segments[0]
-        if (expandedSegment) {
-          setExpanded((prev) => ({ ...prev, [key]: expandedSegment }))
-        }
-        if (response.errors.length > 0) {
-          const firstError = response.errors[0]
-          setStatus(
-            `Segment expansion failed: ${firstError.error ?? 'unknown error'}`,
-          )
-        }
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : 'Expand failed.')
-      } finally {
-        setIsExpanding((prev) => ({ ...prev, [key]: false }))
-      }
-    },
-    [expanded],
-  )
+  }, [source, destination])
 
   const mapSegments = useMemo(
     () => segments.map((segment) => expanded[segmentKey(segment)] ?? segment),
     [segments, expanded],
   )
 
+  const canRoute = Boolean(source && destination)
+
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <header>
-          <h1>Routing Explorer</h1>
-          <p>Select two points, compute a route, expand segments.</p>
-        </header>
-        <section className="panel">
-          <div className="panel-row">
-            <div>
-              <div className="label">Start</div>
-              <div className="value">
-                {start ? `${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}` : 'Click map'}
-              </div>
-            </div>
-            <div>
-              <div className="label">End</div>
-              <div className="value">
-                {end ? `${end.lat.toFixed(5)}, ${end.lng.toFixed(5)}` : 'Click map'}
-              </div>
-            </div>
-          </div>
-          <div className="panel-row">
-            <button
-              type="button"
-              onClick={handleRoute}
-              disabled={!start || !end || isRouting}
-            >
-              {isRouting ? 'Routing...' : 'Compute route'}
-            </button>
-            <button type="button" onClick={handleReset}>
-              Reset
-            </button>
-          </div>
-          {route && (
-            <div className="summary">
-              <div>
-                <strong>Segments</strong>: {route.summary.segments_count}
-              </div>
-              <div>
-                <strong>Distance</strong>: {route.summary.distance_m.toFixed(1)} m
-              </div>
-            </div>
-          )}
-          {status && <div className="status">{status}</div>}
-        </section>
-        <SegmentsPanel
-          segments={segments}
-          expandedKeys={new Set(Object.keys(expanded))}
-          onExpand={handleExpand}
-          isExpanding={isExpanding}
-          disabled={!hasRoute}
-        />
-      </aside>
-      <main className="map-area">
+    <div className="app-container">
+      <FloatingSearchBar
+        source={source}
+        destination={destination}
+        onSourceChange={setSource}
+        onDestinationChange={setDestination}
+        pinMode={pinMode}
+        onPinModeChange={setPinMode}
+        onRoute={handleRoute}
+        onClear={handleClear}
+        isRouting={isRouting}
+        canRoute={canRoute}
+        status={status}
+      />
+      <div className="map-area">
         <MapView
           center={DEFAULT_CENTER}
-          start={start}
-          end={end}
+          start={source?.coord ?? null}
+          end={destination?.coord ?? null}
           onMapClick={handleMapClick}
           polylines={mapSegments}
+          pinMode={pinMode}
         />
-      </main>
+      </div>
+      {route && route.path_found && (
+        <div className="route-summary">
+          <strong>Distance: </strong>
+          <span>{(route.summary.distance_m / 1000).toFixed(2)} km</span>
+        </div>
+      )}
     </div>
   )
 }
