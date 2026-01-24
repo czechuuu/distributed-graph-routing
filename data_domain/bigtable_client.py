@@ -26,7 +26,7 @@ class BigtableClient:
             return None
         
         try:
-            cell = row.cells['cf'][b'val'][0]
+            cell = row.cells['cf'][b'data'][0]
             lookup = pb.ShardLookup()
             lookup.ParseFromString(cell.value)
             return lookup.shard_id
@@ -43,7 +43,7 @@ class BigtableClient:
         for row in rows:
             try:
                 nid = row.row_key.decode('utf-8')[2:]
-                cell = row.cells['cf'][b'val'][0]
+                cell = row.cells['cf'][b'data'][0]
                 lookup = pb.ShardLookup()
                 lookup.ParseFromString(cell.value)
                 result[nid] = lookup.shard_id
@@ -58,7 +58,7 @@ class BigtableClient:
             return None
         
         try:
-            cell = row.cells['cf'][b'val'][0]
+            cell = row.cells['cf'][b'data'][0]
             shard = pb.ShardGraph()
             shard.ParseFromString(cell.value)
             return shard
@@ -73,7 +73,7 @@ class BigtableClient:
             return None
         
         try:
-            cell = row.cells['cf'][b'val'][0]
+            cell = row.cells['cf'][b'data'][0]
             path = pb.ShortcutPath()
             path.ParseFromString(cell.value)
             return path
@@ -87,7 +87,7 @@ class BigtableClient:
             return pb.OverlayGraph()
         
         try:
-            cell = row.cells['cf'][b'val'][0]
+            cell = row.cells['cf'][b'data'][0]
             overlay = pb.OverlayGraph()
             overlay.ParseFromString(cell.value)
             return overlay
