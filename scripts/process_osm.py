@@ -378,8 +378,8 @@ Examples:
         print(f"  Nodes: {nodes_size:.1f} MB")
         print(f"  Edges: {edges_size:.1f} MB")
 
-        upload_to_gcs(nodes_file, "rsp_graph_data_test", "raw/nodes")
-        upload_to_gcs(edges_file, "rsp_graph_data_test", "raw/edges")
+        upload_to_gcs(nodes_file, "rsp_graph_data_massive", "raw/nodes")
+        upload_to_gcs(edges_file, "rsp_graph_data_massive", "raw/edges")
         
     finally:
         # Clean up temp directory if used

@@ -8,7 +8,7 @@ message Coordinate {
 }
 
 message NodeRef {
-    uint64 node_id = 1;
+    fixed64 node_id = 1;
     double lat = 2;
     double lng = 3;
 }
@@ -19,7 +19,7 @@ enum BoundaryMode {
 }
 
 message SnapAndBoundaryDistsRequest {
-    uint64 shard_id = 1;
+    fixed64 shard_id = 1;
     double lat = 2;
     double lng = 3;
     BoundaryMode mode = 4;
@@ -29,14 +29,14 @@ message SnapAndBoundaryDistsResponse {
     bool ok = 1;
     string error = 2;
     NodeRef snapped = 3;
-    repeated uint64 boundary_node_ids = 4;
-    map<uint64, uint32> dists = 5;
+    repeated fixed64 boundary_node_ids = 4;
+    map<fixed64, uint32> dists = 5;
 }
 
 message ExpandPathRequest {
-    uint64 shard_id = 1;
-    uint64 u_node_id = 2;
-    uint64 v_node_id = 3;
+    fixed64 shard_id = 1;
+    fixed64 u_node_id = 2;
+    fixed64 v_node_id = 3;
 }
 
 message ExpandPathResponse {

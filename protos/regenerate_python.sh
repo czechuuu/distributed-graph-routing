@@ -44,18 +44,6 @@ uv pip install --python "$PY" \
 
 PROTOC=( "$PY" -m grpc_tools.protoc -I protos )
 
-# bigtable_storage.proto (Bigtable protos used by legacy pipelines + legacy serving/data-domain)
-"${PROTOC[@]}" --python_out=legacy_serving_layer/storage_types \
-              --grpc_python_out=legacy_serving_layer/storage_types \
-              protos/bigtable_storage.proto
-"${PROTOC[@]}" --python_out=legacy_data_domain/storage_types \
-              --grpc_python_out=legacy_data_domain/storage_types \
-              protos/bigtable_storage.proto
-"${PROTOC[@]}" --python_out=legacy_preprocessing/storage_types \
-              protos/bigtable_storage.proto
-"${PROTOC[@]}" --python_out=scripts/storage_types \
-              protos/bigtable_storage.proto
-
 # gcs_storage.proto (GCS protos used by preprocessing + serving)
 "${PROTOC[@]}" --python_out=preprocessing/dataflow/storage_types \
               protos/gcs_storage.proto
@@ -65,8 +53,8 @@ PROTOC=( "$PY" -m grpc_tools.protoc -I protos )
               protos/gcs_storage.proto
 
 # shard_worker.proto (gRPC service protos used by serving/worker)
-"${PROTOC[@]}" --python_out=serving/serving/protos \
-              --grpc_python_out=serving/serving/protos \
+"${PROTOC[@]}" --python_out=serving \
+              --grpc_python_out=serving \
               protos/shard_worker.proto
 
 # Verify headers are exactly Protobuf Python Version: 5.26.1
@@ -79,20 +67,14 @@ root = Path.cwd()
 expected = "# Protobuf Python Version: 5.26.1"
 
 pb2_targets = [
-    root / "legacy_serving_layer/storage_types/bigtable_storage_pb2.py",
-    root / "legacy_data_domain/storage_types/bigtable_storage_pb2.py",
-    root / "legacy_preprocessing/storage_types/bigtable_storage_pb2.py",
-    root / "scripts/storage_types/bigtable_storage_pb2.py",
     root / "preprocessing/dataflow/storage_types/gcs_storage_pb2.py",
     root / "scripts/storage_types/gcs_storage_pb2.py",
     root / "serving/serving/storage_types/gcs_storage_pb2.py",
-    root / "serving/serving/protos/shard_worker_pb2.py",
+    root / "serving/shard_worker_pb2.py",
 ]
 
 grpc_targets = [
-    root / "legacy_serving_layer/storage_types/bigtable_storage_pb2_grpc.py",
-    root / "legacy_data_domain/storage_types/bigtable_storage_pb2_grpc.py",
-    root / "serving/serving/protos/shard_worker_pb2_grpc.py",
+    root / "serving/shard_worker_pb2_grpc.py",
 ]
 
 bad: list[Path] = []

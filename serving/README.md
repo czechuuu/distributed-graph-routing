@@ -9,8 +9,8 @@ This package contains the serving layer for the routing system:
 
 Set env vars (example):
 
-- `GCS_BUCKET=<bucket>`
-- `GCS_PREFIX=<prefix>` (e.g. `protos`)
+- `GCS_BUCKET=rsp_graph_data_test`
+- `GCS_PREFIX=protos`
 
 Then run:
 

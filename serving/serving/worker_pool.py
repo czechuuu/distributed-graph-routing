@@ -8,7 +8,7 @@ from typing import Dict, List, Sequence
 import grpc
 
 from .hrw import pick_node
-from .protos import shard_worker_pb2_grpc
+import shard_worker_pb2_grpc
 
 
 class WorkerPool:

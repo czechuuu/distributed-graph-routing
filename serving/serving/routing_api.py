@@ -19,7 +19,7 @@ from .models import (
     Segment,
 )
 from .overlay import OverlayGraphData, parse_overlay
-from .protos import shard_worker_pb2
+import shard_worker_pb2
 from .s2 import shard_id_for_lat_lng
 from .worker_pool import WorkerPool
 

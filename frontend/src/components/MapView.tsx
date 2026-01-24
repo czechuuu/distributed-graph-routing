@@ -12,6 +12,10 @@ L.Icon.Default.mergeOptions({
   shadowUrl,
 })
 
+// Fix for default marker icon in Vite/Webpack environments
+// where the import returns a full URL but Leaflet tries to prepend a path.
+delete (L.Icon.Default.prototype as any)._getIconUrl
+
 type MapViewProps = {
   center: Coordinate
   start: Coordinate | null

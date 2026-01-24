@@ -5,6 +5,7 @@ WORKDIR /app
 COPY serving/pyproject.toml serving/uv.lock ./
 RUN uv sync --frozen --no-dev
 
+COPY serving/shard_worker_pb2.py serving/shard_worker_pb2_grpc.py ./
 COPY serving/serving ./serving
 
 EXPOSE 8080
