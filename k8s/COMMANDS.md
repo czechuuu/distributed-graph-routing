@@ -15,7 +15,11 @@ ZONE=us-central1-a
 REGION=us-central1
 CLUSTER=routing
 
-BUCKET=rsp_graph_data_test
+# MAKE SURE TO CHANGE THIS TO BE THE GRAPH YOU WANT
+# options include
+# rsp_graph_data_test
+# rsp_graph_data
+BUCKET=.....
 REPO=routing
 ```
 
@@ -110,16 +114,19 @@ This same workflow works for **both initial deploy and updates**. Run from repo 
 # Set the image tag to the current git commit
 TAG="$(git rev-parse --short HEAD)"
 
-# Build images
-docker build -f serving/Dockerfile.routing-api \
+# Build images (use sudo if not in docker group)
+sudo docker build -f serving/Dockerfile.routing-api \
   -t "$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG" .
 
-docker build -f serving/Dockerfile.shard-worker \
+sudo docker build -f serving/Dockerfile.shard-worker \
   -t "$REGION-docker.pkg.dev/$PROJECT/$REPO/shard-worker:$TAG" .
 
+# Authenticate Docker with GCP (pipes your gcloud token to root's docker)
+gcloud auth print-access-token | sudo docker login -u oauth2accesstoken --password-stdin "$REGION-docker.pkg.dev"
+
 # Push to Artifact Registry
-docker push "$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG"
-docker push "$REGION-docker.pkg.dev/$PROJECT/$REPO/shard-worker:$TAG"
+sudo docker push "$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG"
+sudo docker push "$REGION-docker.pkg.dev/$PROJECT/$REPO/shard-worker:$TAG"
 
 # Update kustomization.yaml with new image tags
 cd k8s
@@ -163,14 +170,16 @@ When you modify the code and want to deploy updates, simply re-run **step 7**. T
 ```bash
 TAG="$(git rev-parse --short HEAD)"
 
-# Build and push
-docker build -f serving/Dockerfile.routing-api \
+# Build images
+sudo docker build -f serving/Dockerfile.routing-api \
   -t "$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG" .
-docker build -f serving/Dockerfile.shard-worker \
+sudo docker build -f serving/Dockerfile.shard-worker \
   -t "$REGION-docker.pkg.dev/$PROJECT/$REPO/shard-worker:$TAG" .
 
-docker push "$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG"
-docker push "$REGION-docker.pkg.dev/$PROJECT/$REPO/shard-worker:$TAG"
+# Authenticate and push
+gcloud auth print-access-token | sudo docker login -u oauth2accesstoken --password-stdin "$REGION-docker.pkg.dev"
+sudo docker push "$REGION-docker.pkg.dev/$PROJECT/$REPO/routing-api:$TAG"
+sudo docker push "$REGION-docker.pkg.dev/$PROJECT/$REPO/shard-worker:$TAG"
 
 # Update image tags and deploy
 cd k8s
@@ -182,6 +191,16 @@ kubectl apply -k .
 
 # Wait for rollout
 kubectl rollout status deploy/routing-api deploy/shard-worker
+```
+
+## Rerunning the deploy
+To rerun the deploy with the same images but different k8s config, run:
+
+```bash
+kubectl apply -k .
+
+kubectl rollout restart deployment routing-api
+kubectl rollout restart deployment shard-worker
 ```
 
 ### Rolling back
