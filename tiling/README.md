@@ -1,16 +1,16 @@
 # VM-optimized OSM PBF tiling (GCP)
 
-This folder contains a faster tiling script for very large PBFs (e.g. Europe). It trades RAM for speed **but keeps RAM bounded** by extracting tiles in **batches** (one pass per batch) rather than one pass per tile.
+This folder contains a tiling script optimized for very large PBFs (e.g. Europe). It produces **variable-sized tiles** by recursively splitting the filtered PBF based on file size.
 
 ## What’s different vs `scripts/tile_osm_fast.sh`
 
 - **Old**: `osmium extract -b ...` per tile → re-reads the input file thousands of times for Europe (slow).
-- **New**: `osmium extract -c batch.json` per *batch* → re-reads the input file tens of times (much faster).
+- **New**: recursive **supertile** extracts (via `osmium extract -c`) → variable-sized leaf tiles sized by `TARGET_LEAF_BYTES`.
 
 Hard bounds:
 
-- **`BATCH_TILES`**: maximum tiles per `osmium extract` pass (bounds memory / open outputs).
-- **`MAX_PROCS`**: maximum concurrent extract passes (bounds CPU/IO/memory).
+- **`MAX_SPLIT_GRID_N`**: upper bound on grid size per split (caps children at `N×N`).
+- **`TARGET_LEAF_BYTES`**: target size used to compute `N`.
 
 
 ## Local usage
@@ -19,16 +19,23 @@ From repo root:
 
 ```bash
 chmod +x tiling/tile_osm_vm.sh
-OUTPUT_DIR=./osm_tiles_vm BATCH_TILES=128 MAX_PROCS=1 ./tiling/tile_osm_vm.sh europe
+OUTPUT_DIR=./osm_tiles_vm SPLIT_GRID_N=auto TARGET_LEAF_BYTES=1073741824 ./tiling/tile_osm_vm.sh europe
 ```
 
 Upload to GCS (requires `gsutil`):
 
 ```bash
-OUTPUT_DIR=./osm_tiles_vm BATCH_TILES=128 MAX_PROCS=2 ./tiling/tile_osm_vm.sh europe gs://rsp_graph_data_test/v2/osm_tiles
+OUTPUT_DIR=./osm_tiles_vm SPLIT_GRID_N=auto TARGET_LEAF_BYTES=1073741824 ./tiling/tile_osm_vm.sh europe gs://rsp_graph_data_test/v2/osm_tiles
 ```
 
-Note: when `gcs_path` is provided, the script **uploads and deletes each batch** (it does not keep all tiles locally).
+Note: when `gcs_path` is provided, the script **uploads and deletes outputs** (it does not keep all tiles locally).
+
+## Recursive split knobs
+
+- `SPLIT_GRID_N=<int|auto>`: fixed grid size per level, or `auto` to choose `N` from size.
+- `MIN_SPLIT_GRID_N=1`, `MAX_SPLIT_GRID_N=10`: bounds for auto mode.
+- `TARGET_LEAF_BYTES=104857600`: auto mode target size per leaf PBF.
+- `SUPERTILE_OVERLAP_KM=2.0`: overlap used when extracting child tiles (must be ≥ tile overlap).
 
 ## Deploy on Google Cloud (Compute Engine VM)
 
@@ -45,7 +52,7 @@ Pick a zone close to Geofabrik and your GCS bucket, then run:
 export PROJECT_ID="repetitive-shortest-paths"
 export ZONE="us-central1-a"
 export VM_NAME="osm-tiler"
-export MACHINE="n2-standard-32"
+export MACHINE="n2-highmem-16"
 
 gcloud compute instances create "$VM_NAME" \
   --project="$PROJECT_ID" \
@@ -94,17 +101,9 @@ fi
 
 ### 3) Get the code onto the VM
 
-Option A: clone the repo:
-
 ```bash
-git clone https://github.com/<you>/<repo>.git
+git clone https://github.com/czechuuu/distributed-graph-routing.git
 cd distributed-graph-routing
-```
-
-Option B: `gcloud compute scp` (from your laptop):
-
-```bash
-gcloud compute scp --recurse . "$VM_NAME:~/distributed-graph-routing" --zone="$ZONE"
 ```
 
 ### 4) Run tiling
@@ -115,14 +114,14 @@ On the VM:
 cd ~/distributed-graph-routing
 chmod +x tiling/tile_osm_vm.sh
 
-export BUCKET="rsp_graph_data_test"
-export TILES_PREFIX="v2/osm_tiles"
+export BUCKET="rsp_graph_data_massive"
+export TILES_PREFIX="v3/osm_tiles"
 
 export OUTPUT_DIR="$HOME/osm_tiles_work"
 export CACHE_DIR="$HOME/osm_pbf_cache"
-export BATCH_TILES="64"
-export MAX_PROCS="1"
-export RAISE_NOFILE="65535"   # optional; helpful if you increase BATCH_TILES
+export SPLIT_GRID_N="auto"
+export TARGET_LEAF_BYTES="1073741824"
+export RAISE_NOFILE="65535"
 
 ./tiling/tile_osm_vm.sh europe "gs://$BUCKET/$TILES_PREFIX"
 ```
@@ -138,11 +137,7 @@ gcloud compute instances delete "$VM_NAME" --zone="$ZONE"
 ## Tuning tips (Europe)
 
 - **Start conservative**:
-  - `BATCH_TILES=128`
-  - `MAX_PROCS=1` (increase to 2 if you have fast SSD and plenty of CPU)
+  - `SPLIT_GRID_N=auto`
+  - `TARGET_LEAF_BYTES=1073741824` (1 GiB)
 - If you see “too many open files” errors:
-  - lower `BATCH_TILES`, or set `RAISE_NOFILE=65535`
-- If the VM is CPU-idle but disk isn’t maxed:
-  - increase `MAX_PROCS` to 2–4
-- If disk throughput is the bottleneck:
-  - keep `MAX_PROCS` low; larger `MAX_PROCS` can make it slower due to IO contention
+  - lower `MAX_SPLIT_GRID_N`, or set `RAISE_NOFILE=65535`

@@ -3,32 +3,32 @@
 #
 # Key idea:
 # - Filter once to highways-only (much smaller file)
-# - Extract tiles in BATCHES using `osmium extract -c <json>` (one pass per batch)
-# - Optional bounded parallelism across batches
+# - Recursively split the PBF into variable-sized tiles based on file size
+# - Each leaf tile is written/uploaded with bbox-based filenames
 #
 # Usage:
 #   ./tile_osm_vm.sh <region|/path/to/input.osm.pbf> [gcs_path]
 #
 # Examples:
 #   ./tile_osm_vm.sh europe
-#   OUTPUT_DIR=/mnt/disks/ssd/osm_tiles BATCH_TILES=128 MAX_PROCS=2 ./tile_osm_vm.sh europe gs://rsp_graph_data_test/v2/osm_tiles
+#   OUTPUT_DIR=/mnt/disks/ssd/osm_tiles SPLIT_GRID_N=auto TARGET_LEAF_BYTES=1073741824 ./tile_osm_vm.sh europe gs://rsp_graph_data_test/v2/osm_tiles
 #   ./tile_osm_vm.sh /data/europe-latest.osm.pbf gs://rsp_graph_data_test/v2/osm_tiles
 #
 # Requirements:
-#   osmium-tool, bc, curl, python3, coreutils (split), (optional) gsutil
+#   osmium-tool, bc, curl, python3, (optional) gsutil
 #
 set -euo pipefail
 
 # --- Tunables (safe defaults) ---
-TILE_SIZE_DEG="${TILE_SIZE_DEG:-0.5}"
 OVERLAP_KM="${OVERLAP_KM:-2.0}"
 OUTPUT_DIR="${OUTPUT_DIR:-./osm_tiles}"
 
-# Hard bounds:
-# - BATCH_TILES bounds the state osmium keeps for multi-extract.
-# - MAX_PROCS bounds concurrent extract processes (CPU/IO/memory).
-BATCH_TILES="${BATCH_TILES:-128}"
-MAX_PROCS="${MAX_PROCS:-1}"
+# Recursive split controls (recursive mode is the only mode).
+SPLIT_GRID_N="${SPLIT_GRID_N:-auto}" # integer or "auto"
+MIN_SPLIT_GRID_N="${MIN_SPLIT_GRID_N:-1}"
+MAX_SPLIT_GRID_N="${MAX_SPLIT_GRID_N:-10}"
+TARGET_LEAF_BYTES="${TARGET_LEAF_BYTES:-1073741824}" # 1 GiB
+SUPERTILE_OVERLAP_KM="${SUPERTILE_OVERLAP_KM:-${OVERLAP_KM}}"
 
 # Download caching (only applies when the first arg is a supported region name).
 # Cached file path defaults to: "$OUTPUT_DIR/.cache/<region>-latest.osm.pbf"
@@ -38,7 +38,7 @@ FORCE_DOWNLOAD="${FORCE_DOWNLOAD:-false}" # set to "true" to re-download even if
 # When true, asks osmium to write bounds into output files (a bit slower).
 SET_BOUNDS="${SET_BOUNDS:-false}"
 
-# If non-empty, tries to raise open-file limit (useful for large BATCH_TILES).
+# If non-empty, tries to raise open-file limit (useful for large extracts).
 RAISE_NOFILE="${RAISE_NOFILE:-}"
 
 HIGHWAY_TYPES="${HIGHWAY_TYPES:-motorway,trunk,primary,secondary,tertiary,unclassified,residential,motorway_link,trunk_link,primary_link,secondary_link,tertiary_link,living_street,service,road}"
@@ -90,52 +90,174 @@ maybe_raise_nofile() {
   log "ulimit -n is now: $(ulimit -n 2>/dev/null || echo '?')"
 }
 
-write_extract_config_json() {
-  # Args: tiles_csv output_json output_dir
-  local tiles_csv="$1"
-  local out_json="$2"
-  local out_dir="$3"
-
-  python3 - "$tiles_csv" "$out_json" "$out_dir" <<'PY'
-import json, sys, os
-
-tiles_csv, out_json, out_dir = sys.argv[1], sys.argv[2], sys.argv[3]
-
-def fmt_coord(s: str) -> str:
-    return s.replace(".", "_").replace("-", "m")
-
-extracts = []
-with open(tiles_csv, "r", encoding="utf-8") as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.split(",")
-        if len(parts) != 4:
-            raise ValueError(f"Bad tile line: {line!r}")
-        min_lon_s, min_lat_s, max_lon_s, max_lat_s = (p.strip() for p in parts)
-        out_name = (
-            f"tile_{fmt_coord(min_lat_s)}_{fmt_coord(min_lon_s)}_"
-            f"{fmt_coord(max_lat_s)}_{fmt_coord(max_lon_s)}.osm.pbf"
-        )
-        extracts.append(
-            {
-                "output": os.path.join(out_dir, out_name),
-                "bbox": [float(min_lon_s), float(min_lat_s), float(max_lon_s), float(max_lat_s)],
-            }
-        )
-
-cfg = {"extracts": extracts}
-with open(out_json, "w", encoding="utf-8") as out:
-    json.dump(cfg, out)
+choose_split_grid_n() {
+  # Args: size_bytes
+  local size_bytes="$1"
+  if [[ "$SPLIT_GRID_N" != "auto" ]]; then
+    echo "$SPLIT_GRID_N"
+    return 0
+  fi
+  python3 - "$size_bytes" "$TARGET_LEAF_BYTES" "$MIN_SPLIT_GRID_N" "$MAX_SPLIT_GRID_N" <<'PY'
+import math, sys
+size_bytes = max(1, int(sys.argv[1]))
+target = max(1, int(sys.argv[2]))
+min_n = max(1, int(sys.argv[3]))
+max_n = max(min_n, int(sys.argv[4]))
+raw = math.ceil(math.sqrt(size_bytes / target))
+value = max(min_n, min(max_n, raw))
+print(value)
 PY
 }
 
-wait_for_slot() {
-  # Bounded parallelism without external deps; requires bash with wait -n.
-  while (( $(jobs -pr | wc -l) >= MAX_PROCS )); do
-    wait -n
-  done
+tile_filename() {
+  # Args: min_lon min_lat max_lon max_lat
+  local min_lon="$1"
+  local min_lat="$2"
+  local max_lon="$3"
+  local max_lat="$4"
+  local fn_min_lat fn_min_lon fn_max_lat fn_max_lon
+  fn_min_lat=$(fmt_coord "$min_lat")
+  fn_min_lon=$(fmt_coord "$min_lon")
+  fn_max_lat=$(fmt_coord "$max_lat")
+  fn_max_lon=$(fmt_coord "$max_lon")
+  echo "tile_${fn_min_lat}_${fn_min_lon}_${fn_max_lat}_${fn_max_lon}.osm.pbf"
+}
+
+expanded_bbox() {
+  # Args: core_min_lon core_min_lat core_max_lon core_max_lat
+  local core_min_lon="$1"
+  local core_min_lat="$2"
+  local core_max_lon="$3"
+  local core_max_lat="$4"
+  local e_min_lon e_min_lat e_max_lon e_max_lat
+  e_min_lon=$(python3 - "$core_min_lon" "$SUPERTILE_OVERLAP_DEG" "$ROOT_MIN_LON" "$ROOT_MAX_LON" <<'PY'
+import sys
+val = float(sys.argv[1]) - float(sys.argv[2])
+lo = float(sys.argv[3]); hi = float(sys.argv[4])
+print(f"{max(lo, min(hi, val)):.6f}")
+PY
+)
+  e_max_lon=$(python3 - "$core_max_lon" "$SUPERTILE_OVERLAP_DEG" "$ROOT_MIN_LON" "$ROOT_MAX_LON" <<'PY'
+import sys
+val = float(sys.argv[1]) + float(sys.argv[2])
+lo = float(sys.argv[3]); hi = float(sys.argv[4])
+print(f"{max(lo, min(hi, val)):.6f}")
+PY
+)
+  e_min_lat=$(python3 - "$core_min_lat" "$SUPERTILE_OVERLAP_DEG" "$ROOT_MIN_LAT" "$ROOT_MAX_LAT" <<'PY'
+import sys
+val = float(sys.argv[1]) - float(sys.argv[2])
+lo = float(sys.argv[3]); hi = float(sys.argv[4])
+print(f"{max(lo, min(hi, val)):.6f}")
+PY
+)
+  e_max_lat=$(python3 - "$core_max_lat" "$SUPERTILE_OVERLAP_DEG" "$ROOT_MIN_LAT" "$ROOT_MAX_LAT" <<'PY'
+import sys
+val = float(sys.argv[1]) + float(sys.argv[2])
+lo = float(sys.argv[3]); hi = float(sys.argv[4])
+print(f"{max(lo, min(hi, val)):.6f}")
+PY
+)
+  echo "$e_min_lon,$e_min_lat,$e_max_lon,$e_max_lat"
+}
+
+split_node() {
+  # Args: node_id input_pbf min_lon min_lat max_lon max_lat
+  local node_id="$1"
+  local input_pbf="$2"
+  local min_lon="$3"
+  local min_lat="$4"
+  local max_lon="$5"
+  local max_lat="$6"
+
+  local size_bytes
+  size_bytes=$(stat -c%s "$input_pbf" 2>/dev/null || wc -c < "$input_pbf")
+
+  local grid_n
+  grid_n="$(choose_split_grid_n "$size_bytes")"
+  if (( grid_n < 2 )); then
+    local out_name out_path expanded
+    expanded="$(expanded_bbox "$min_lon" "$min_lat" "$max_lon" "$max_lat")"
+    IFS=',' read -r e_min_lon e_min_lat e_max_lon e_max_lat <<< "$expanded"
+    out_name="$(tile_filename "$e_min_lon" "$e_min_lat" "$e_max_lon" "$e_max_lat")"
+    out_path="$OUTPUT_DIR/$out_name"
+    if [[ -n "$gcs_path" ]]; then
+      gsutil cp "$input_pbf" "$gcs_path/$out_name"
+      rm -f "$input_pbf"
+    else
+      mv -f "$input_pbf" "$out_path"
+    fi
+    return 0
+  fi
+
+  local node_dir child_specs child_config
+  node_dir="$work_dir/split_${node_id}"
+  mkdir -p "$node_dir"
+  child_specs="$node_dir/children.tsv"
+  child_config="$node_dir/children.json"
+
+  python3 - "$child_specs" "$child_config" "$node_dir" \
+    "$min_lon" "$min_lat" "$max_lon" "$max_lat" "$grid_n" "$SUPERTILE_OVERLAP_DEG" \
+    "$ROOT_MIN_LON" "$ROOT_MIN_LAT" "$ROOT_MAX_LON" "$ROOT_MAX_LAT" <<'PY'
+import json
+import math
+import os
+import sys
+
+child_specs, child_config, node_dir = sys.argv[1:4]
+min_lon, min_lat, max_lon, max_lat = map(float, sys.argv[4:8])
+grid_n = int(sys.argv[8])
+overlap = float(sys.argv[9])
+root_min_lon, root_min_lat, root_max_lon, root_max_lat = map(float, sys.argv[10:14])
+
+lon_step = (max_lon - min_lon) / grid_n
+lat_step = (max_lat - min_lat) / grid_n
+
+def clamp(val, lo, hi):
+    return max(lo, min(hi, val))
+
+def fmt_coord(value: float) -> str:
+    return f"{value:.6f}".replace(".", "_").replace("-", "m")
+
+extracts = []
+with open(child_specs, "w", encoding="utf-8") as specs:
+    for child_id in range(grid_n * grid_n):
+        iy, ix = divmod(child_id, grid_n)
+        c_min_lon = min_lon + ix * lon_step
+        c_max_lon = min_lon + (ix + 1) * lon_step
+        c_min_lat = min_lat + iy * lat_step
+        c_max_lat = min_lat + (iy + 1) * lat_step
+
+        e_min_lon = clamp(c_min_lon - overlap, root_min_lon, root_max_lon)
+        e_max_lon = clamp(c_max_lon + overlap, root_min_lon, root_max_lon)
+        e_min_lat = clamp(c_min_lat - overlap, root_min_lat, root_max_lat)
+        e_max_lat = clamp(c_max_lat + overlap, root_min_lat, root_max_lat)
+
+        out_name = (
+            f"tile_{fmt_coord(e_min_lat)}_{fmt_coord(e_min_lon)}_"
+            f"{fmt_coord(e_max_lat)}_{fmt_coord(e_max_lon)}.osm.pbf"
+        )
+        child_pbf = os.path.join(node_dir, out_name)
+
+        specs.write(f"{child_id}\t{child_pbf}\t{c_min_lon},{c_min_lat},{c_max_lon},{c_max_lat}\n")
+        extracts.append(
+            {
+                "output": child_pbf,
+                "bbox": [e_min_lon, e_min_lat, e_max_lon, e_max_lat],
+            }
+        )
+
+with open(child_config, "w", encoding="utf-8") as out:
+    json.dump({"extracts": extracts}, out)
+PY
+
+  log "Splitting node $node_id into ${grid_n}x${grid_n} (size=$(du -h "$input_pbf" | cut -f1))"
+  osmium extract -c "$child_config" "$input_pbf" --overwrite
+
+  while IFS=$'\t' read -r child_id child_pbf child_bbox; do
+    IFS=',' read -r c_min_lon c_min_lat c_max_lon c_max_lat <<< "$child_bbox"
+    split_node "${node_id}_${child_id}" "$child_pbf" "$c_min_lon" "$c_min_lat" "$c_max_lon" "$c_max_lat"
+  done < "$child_specs"
 }
 
 main() {
@@ -143,7 +265,6 @@ main() {
   command -v bc >/dev/null 2>&1 || die "bc not found. Install with: apt install bc"
   command -v curl >/dev/null 2>&1 || die "curl not found. Install with: apt install curl"
   command -v python3 >/dev/null 2>&1 || die "python3 not found. Install with: apt install python3"
-  command -v split >/dev/null 2>&1 || die "split not found. Install with: apt install coreutils"
 
   local region_or_file="${1:-}"
   local gcs_path="${2:-}"
@@ -222,93 +343,25 @@ main() {
   log "Bounds: ($min_lon, $min_lat) → ($max_lon, $max_lat)"
 
   # Calculate overlap in degrees
-  local overlap_deg
-  overlap_deg=$(echo "scale=6; $OVERLAP_KM / 111.32" | bc)
+  local supertile_overlap_deg
+  supertile_overlap_deg=$(echo "scale=6; $SUPERTILE_OVERLAP_KM / 111.32" | bc)
 
-  # Generate tile list
-  local tiles_file="$work_dir/tiles.csv"
-  python3 - "$min_lon" "$min_lat" "$max_lon" "$max_lat" "$TILE_SIZE_DEG" "$overlap_deg" > "$tiles_file" << 'PYTHON'
-import sys
-min_lon, min_lat, max_lon, max_lat = map(float, sys.argv[1:5])
-tile_size, overlap = float(sys.argv[5]), float(sys.argv[6])
-lat = min_lat
-while lat < max_lat:
-    lon = min_lon
-    while lon < max_lon:
-        t_min_lat, t_min_lon = lat - overlap, lon - overlap
-        t_max_lat = min(lat + tile_size, max_lat) + overlap
-        t_max_lon = min(lon + tile_size, max_lon) + overlap
-        print(f"{t_min_lon},{t_min_lat},{t_max_lon},{t_max_lat}")
-        lon = min(lon + tile_size, max_lon) if lon + tile_size < max_lon else max_lon + 1
-    lat = min(lat + tile_size, max_lat) if lat + tile_size < max_lat else max_lat + 1
-PYTHON
-
-  local tile_count
-  tile_count=$(wc -l < "$tiles_file")
-  log "Prepared $tile_count tiles. Extracting in batches of $BATCH_TILES with MAX_PROCS=$MAX_PROCS."
-
-  # Split tiles into batches
-  local batches_dir="$work_dir/batches"
-  mkdir -p "$batches_dir"
-  split -l "$BATCH_TILES" -d --additional-suffix=.csv "$tiles_file" "$batches_dir/batch_"
-
-  # If uploading, we upload+delete each batch to keep disk usage bounded.
+  # If uploading, we upload+delete outputs to keep disk usage bounded.
   if [[ -n "$gcs_path" ]]; then
     command -v gsutil >/dev/null 2>&1 || die "gsutil not found. Install Google Cloud SDK or run without gcs_path."
-    log "Will upload and delete each batch to: $gcs_path"
+    log "Will upload and delete outputs to: $gcs_path"
   fi
 
-  # Extract each batch in one pass over highways_file
-  shopt -s nullglob
-  local batch_tiles
-  for batch_tiles in "$batches_dir"/batch_*.csv; do
-    wait_for_slot
-    (
-      # Important: prevent subshells from running the parent's EXIT trap.
-      # Otherwise, when a background batch exits (or gets OOM-killed), it could delete
-      # the shared work_dir (including highways.osm.pbf) while other batches are running.
-      trap - EXIT
-
-      local batch_name config_json batch_out_dir
-      batch_name="$(basename "$batch_tiles" .csv)"
-      config_json="$batches_dir/${batch_name}.json"
-
-      # If uploading, extract into a batch-specific temp dir; upload it; then delete it.
-      # Otherwise, write outputs directly to OUTPUT_DIR.
-      if [[ -n "$gcs_path" ]]; then
-        batch_out_dir="$work_dir/out/$batch_name"
-        mkdir -p "$batch_out_dir"
-      else
-        batch_out_dir="$OUTPUT_DIR"
-      fi
-
-      write_extract_config_json "$batch_tiles" "$config_json" "$batch_out_dir"
-      log "Extracting $batch_name ($(wc -l < "$batch_tiles") tiles)..."
-      if [[ "$SET_BOUNDS" == "true" ]]; then
-        osmium extract -c "$config_json" "$highways_file" --overwrite --set-bounds
-      else
-        osmium extract -c "$config_json" "$highways_file" --overwrite
-      fi
-      log "Finished $batch_name"
-
-      if [[ -n "$gcs_path" ]]; then
-        if compgen -G "$batch_out_dir"/*.osm.pbf >/dev/null; then
-          log "Uploading $batch_name..."
-          gsutil -m cp "$batch_out_dir"/*.osm.pbf "$gcs_path/"
-          rm -f "$batch_out_dir"/*.osm.pbf
-        else
-          log "No outputs found for $batch_name (skipping upload)."
-        fi
-        rm -rf "$batch_out_dir"
-        log "Uploaded+deleted $batch_name"
-      fi
-    ) &
-  done
-  wait
-  shopt -u nullglob
+  ROOT_MIN_LON="$min_lon"
+  ROOT_MIN_LAT="$min_lat"
+  ROOT_MAX_LON="$max_lon"
+  ROOT_MAX_LAT="$max_lat"
+  SUPERTILE_OVERLAP_DEG="$supertile_overlap_deg"
+  log "Recursive split enabled: grid=${SPLIT_GRID_N}, target_leaf_bytes=${TARGET_LEAF_BYTES}"
+  split_node "root" "$highways_file" "$min_lon" "$min_lat" "$max_lon" "$max_lat"
 
   if [[ -n "$gcs_path" ]]; then
-    log "✓ Finished tiling (uploaded per batch to $gcs_path)"
+    log "✓ Finished tiling (uploaded to $gcs_path)"
   else
     log "✓ Finished tiling into $OUTPUT_DIR"
   fi
