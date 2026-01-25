@@ -25,7 +25,7 @@ class LocalGraphFacade(GraphFacade):
     """
     def __init__(self, overlay_graph: nx.DiGraph, shard_graphs: Dict[int, nx.DiGraph], shortcuts_map: Dict[Tuple[int, int], List[int]], max_cache_size: int = 10000):
         # Initialize parent with mock=True logic but we override accessors
-        super().__init__("test-proj", "test-instance", "shortcuts", "intra", "shortcuts_paths", use_mock=True)
+        super().__init__("test-proj", "test-instance", "shortcuts", "intra", "shortcuts_paths", "node_index", use_mock=True)
         self.overlay = overlay_graph
         self.shard_graphs = shard_graphs
         # In this Mock, shortcuts_map acts as the "Bigtable Backing Store"
