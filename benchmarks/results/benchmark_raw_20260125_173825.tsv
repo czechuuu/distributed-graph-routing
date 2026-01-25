@@ -1,0 +1,13 @@
+# Benchmark Raw Results - 2026-01-25T17:38:25.475454
+# URL: http://34.170.114.20:80
+# Runs per test: 1
+#
+CATEGORY	TEST_NAME	QUERY_TYPE	RUN	LATENCY_MS	SUCCESS	PATH_FOUND	DISTANCE_M	SEGMENTS	ERROR
+cross_shard	Warsaw-Gdansk	first	1	1866.14	True	True	11828.00	51	
+cross_shard	Warsaw-Gdansk	cached	1	835.53	False	False	0.00	0	HTTP 503: {"detail":"<_InactiveRpcError of RPC that terminated with:\n\tstatus = StatusCode.UNAVAILABLE\n\tdetails = \"Socket closed\"\n\tdebug_error_string = \"UNKNOWN:Error received from peer  {grpc_status:14
+cross_shard	Krakow-Wroclaw	first	1	10494.74	False	False	0.00	0	HTTP 503: {"detail":"<_InactiveRpcError of RPC that terminated with:\n\tstatus = StatusCode.DEADLINE_EXCEEDED\n\tdetails = \"Deadline Exceeded\"\n\tdebug_error_string = \"UNKNOWN:Error received from peer  {grpc
+cross_shard	Krakow-Wroclaw	cached	1	10043.59	False	False	0.00	0	HTTP 503: {"detail":"<_InactiveRpcError of RPC that terminated with:\n\tstatus = StatusCode.UNAVAILABLE\n\tdetails = \"failed to connect to all addresses; last error: UNKNOWN: ipv4:10.60.0.13:50051: Failed to c
+cross_shard	Poznan-Lodz	first	1	1889.81	True	False	0.00	0	
+cross_shard	Poznan-Lodz	cached	1	510.62	True	False	0.00	0	
+cross_shard	Krakow-Sopot	first	1	429.50	True	False	0.00	0	
+cross_shard	Krakow-Sopot	cached	1	224.38	True	False	0.00	0	

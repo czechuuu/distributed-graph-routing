@@ -1,0 +1,29 @@
+# Benchmark Raw Results - 2026-01-25T17:36:55.648680
+# URL: http://34.170.114.20:80
+# Runs per test: 3
+#
+CATEGORY	TEST_NAME	QUERY_TYPE	RUN	LATENCY_MS	SUCCESS	PATH_FOUND	DISTANCE_M	SEGMENTS	ERROR
+cross_shard	Warsaw-Gdansk	first	1	1780.27	True	True	11828.00	51	
+cross_shard	Warsaw-Gdansk	cached	1	1886.92	True	True	11828.00	51	
+cross_shard	Warsaw-Gdansk	first	2	1886.47	True	True	11828.00	51	
+cross_shard	Warsaw-Gdansk	cached	2	1644.80	True	True	11828.00	51	
+cross_shard	Warsaw-Gdansk	first	3	1889.68	True	True	11828.00	51	
+cross_shard	Warsaw-Gdansk	cached	3	1697.12	True	True	11828.00	51	
+cross_shard	Krakow-Wroclaw	first	1	523.06	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	cached	1	486.57	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	first	2	561.53	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	cached	2	523.32	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	first	3	516.03	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	cached	3	487.25	True	False	0.00	0	
+cross_shard	Poznan-Lodz	first	1	506.04	True	False	0.00	0	
+cross_shard	Poznan-Lodz	cached	1	555.45	True	False	0.00	0	
+cross_shard	Poznan-Lodz	first	2	539.13	True	False	0.00	0	
+cross_shard	Poznan-Lodz	cached	2	519.53	True	False	0.00	0	
+cross_shard	Poznan-Lodz	first	3	583.25	True	False	0.00	0	
+cross_shard	Poznan-Lodz	cached	3	563.93	True	False	0.00	0	
+cross_shard	Krakow-Sopot	first	1	224.33	True	False	0.00	0	
+cross_shard	Krakow-Sopot	cached	1	218.29	True	False	0.00	0	
+cross_shard	Krakow-Sopot	first	2	211.79	True	False	0.00	0	
+cross_shard	Krakow-Sopot	cached	2	222.89	True	False	0.00	0	
+cross_shard	Krakow-Sopot	first	3	216.35	True	False	0.00	0	
+cross_shard	Krakow-Sopot	cached	3	215.08	True	False	0.00	0	

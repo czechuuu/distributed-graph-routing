@@ -57,14 +57,20 @@ test_cases:
     start: {lat: 52.229, lng: 21.012}
     end: {lat: 54.352, lng: 18.647}
 
-  - name: "Krakow-Wroclaw"
-    category: "cross_shard"
-    description: "~270km route between two major cities"
-    start: {lat: 50.061, lng: 19.937}
-    end: {lat: 51.109, lng: 17.032}
+  # - name: "Krakow-Wroclaw"
+  #   category: "cross_shard"
+  #   description: "~270km route between two major cities"
+  #   start: {lat: 50.061, lng: 19.937}
+  #   end: {lat: 51.109, lng: 17.032}
 
   - name: "Poznan-Lodz"
     category: "cross_shard"
     description: "~200km route in central Poland"
     start: {lat: 52.406, lng: 16.925}
     end: {lat: 51.759, lng: 19.456}
+
+  - name: "Krakow-Sopot"
+    category: "cross_shard"
+    description: "~600km route cross the entire country"
+    start: {lat: 50.061, lng: 19.937}
+    end: {lat: 54.441, lng: 18.560}

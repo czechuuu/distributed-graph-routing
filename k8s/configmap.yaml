@@ -4,6 +4,6 @@ metadata:
   name: routing-config
 data:
   GCS_BUCKET: "rsp_graph_data" # PLEASE CHECK IF THIS IS WHAT YOU WANT TO DEPLOY
-  GCS_PREFIX: "protos"
+  GCS_PREFIX: "v2/protos"
   WORKER_SERVICE_HOST: "shard-worker.default.svc.cluster.local"
   WORKER_SERVICE_PORT: "50051"

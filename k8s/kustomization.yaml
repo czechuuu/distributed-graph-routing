@@ -13,9 +13,9 @@ resources:
 images:
 - name: routing-api
   newName: us-central1-docker.pkg.dev/repetitive-shortest-paths/routing/routing-api
-  newTag: e4c06a5
+  newTag: 3b3920a
 - name: shard-worker
   newName: us-central1-docker.pkg.dev/repetitive-shortest-paths/routing/shard-worker
-  newTag: e4c06a5
+  newTag: 3b3920a
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

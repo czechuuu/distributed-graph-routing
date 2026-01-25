@@ -1,0 +1,11 @@
+# Benchmark Raw Results - 2026-01-25T17:49:36.023508
+# URL: http://34.170.114.20:80
+# Runs per test: 1
+#
+CATEGORY	TEST_NAME	QUERY_TYPE	RUN	LATENCY_MS	SUCCESS	PATH_FOUND	DISTANCE_M	SEGMENTS	ERROR
+large_city	Warsaw-Central	first	1	4176.25	True	True	79.00	1	
+large_city	Warsaw-Central	cached	1	1988.60	True	True	79.00	1	
+large_city	Krakow-OldTown	first	1	2607.28	True	False	0.00	0	
+large_city	Krakow-OldTown	cached	1	942.30	True	False	0.00	0	
+large_city	Wroclaw-Center	first	1	2406.38	True	True	204.00	1	
+large_city	Wroclaw-Center	cached	1	939.46	True	True	204.00	1	
