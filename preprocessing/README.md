@@ -35,7 +35,7 @@ cd ../scripts
    * Tiled OSM PBFs: `gs://rsp_graph_data/v2/osm_tiles/*.osm.pbf`
 2. **Processing (Dataflow Job 0)**:
    * Parses OSM nodes and driveable ways from PBF tiles.
-   * Joins ways to nodes to compute endpoint coordinates and S2 shard IDs.
+   * Enriches edges with endpoint coordinates and S2 shard IDs per tile.
    * Computes edge weights as **travel time seconds** using tag heuristics.
    * Deduplicates overlapping tiles.
    * Emits stage‑1 sharded outputs (same layout as Job 1).
@@ -66,6 +66,12 @@ uv run python -m dataflow.job0_main \
 ```
 
 You can specify the weight mode with `--weight_mode=time_s|distance_m` (default: `time_s`).
+
+### Job 0 performance notes
+
+- **Tile size matters**: each tile is parsed and enriched in-memory, so smaller tiles reduce per-worker memory pressure. Adjust `TILE_SIZE_DEG` in `scripts/tile_osm_fast.sh` if needed.
+- **Worker parallelism**: prefer more workers with fewer concurrent tiles over fewer workers with high concurrency. Tune `--max_num_workers`, `--worker_machine_type`, and autoscaling settings when running on Dataflow.
+- **Missing nodes**: missing node references are logged as warnings and the affected edges are skipped to preserve job progress. If warnings are frequent, re-check tile extraction settings or overlap.
 
 
 ## Job 2

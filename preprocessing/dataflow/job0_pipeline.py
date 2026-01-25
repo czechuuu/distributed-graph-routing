@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 from typing import Iterable, NamedTuple, Optional, Tuple
@@ -6,6 +7,7 @@ import apache_beam as beam
 import osmium
 import pyarrow as pa
 from apache_beam.io import fileio
+from apache_beam.metrics import Metrics
 from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
 from s2sphere import CellId, LatLng
 
@@ -171,7 +173,6 @@ class _PbfHandler(osmium.SimpleHandler):
 
 class ParsePbfDoFn(beam.DoFn):
     def process(self, readable_file: fileio.ReadableFile):
-        import logging
         tmp_path = None
         try:
             with readable_file.open() as handle, tempfile.NamedTemporaryFile(
@@ -189,14 +190,105 @@ class ParsePbfDoFn(beam.DoFn):
                 handler.apply_file(tmp_path, locations=True)
             except RuntimeError as e:
                 # Handle empty or corrupted PBF files gracefully
-                file_path = getattr(readable_file.metadata, 'path', 'unknown')
-                logging.warning(f"Skipping file {file_path}: {e}")
+                file_path = getattr(readable_file.metadata, "path", "unknown")
+                logging.warning("Skipping file %s: %s", file_path, e)
                 return  # Skip this file, don't yield any nodes/edges
             
             for node in handler.nodes:
                 yield beam.pvalue.TaggedOutput("nodes", node)
             for edge in handler.edges:
                 yield beam.pvalue.TaggedOutput("edges", edge)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+
+class ParseAndEnrichTileDoFn(beam.DoFn):
+    def process(self, readable_file: fileio.ReadableFile):
+        tmp_path = None
+        file_path = getattr(readable_file.metadata, "path", "unknown")
+        try:
+            with readable_file.open() as handle, tempfile.NamedTemporaryFile(
+                suffix=".osm.pbf", delete=False
+            ) as tmp:
+                while True:
+                    chunk = handle.read(8 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    tmp.write(chunk)
+                tmp_path = tmp.name
+
+            handler = _PbfHandler()
+            try:
+                handler.apply_file(tmp_path, locations=True)
+            except RuntimeError as e:
+                logging.warning("Skipping file %s: %s", file_path, e)
+                return
+
+            node_map: dict[int, tuple[float, float, int]] = {}
+            for node in handler.nodes:
+                shard_id = _compute_shard_id(node.x, node.y)
+                node_map[node.id] = (node.x, node.y, shard_id)
+
+            Metrics.counter("job0", "tile_nodes_total").inc(len(node_map))
+            Metrics.distribution("job0", "tile_nodes_count").update(len(node_map))
+
+            missing_u = 0
+            missing_v = 0
+            missing_u_samples: list[int] = []
+            missing_v_samples: list[int] = []
+
+            for edge in handler.edges:
+                Metrics.counter("job0", "tile_edges_total").inc()
+                node_u = node_map.get(edge.u)
+                node_v = node_map.get(edge.v)
+                if node_u is None:
+                    missing_u += 1
+                    Metrics.counter("job0", "missing_u_nodes").inc()
+                    Metrics.counter("job0", "missing_u_edges_dropped").inc()
+                    if len(missing_u_samples) < 5:
+                        missing_u_samples.append(edge.u)
+                if node_v is None:
+                    missing_v += 1
+                    Metrics.counter("job0", "missing_v_nodes").inc()
+                    Metrics.counter("job0", "missing_v_edges_dropped").inc()
+                    if len(missing_v_samples) < 5:
+                        missing_v_samples.append(edge.v)
+                if node_u is None or node_v is None:
+                    continue
+
+                Metrics.counter("job0", "tile_edges_emitted").inc()
+                x_u, y_u, shard_u = node_u
+                x_v, y_v, shard_v = node_v
+                yield EdgeWithShards(
+                    u=edge.u,
+                    v=edge.v,
+                    direction=edge.direction,
+                    highway=edge.highway,
+                    maxspeed=edge.maxspeed,
+                    maxspeed_forward=edge.maxspeed_forward,
+                    maxspeed_backward=edge.maxspeed_backward,
+                    surface=edge.surface,
+                    tracktype=edge.tracktype,
+                    service=edge.service,
+                    x_u=x_u,
+                    y_u=y_u,
+                    x_v=x_v,
+                    y_v=y_v,
+                    shard_u=shard_u,
+                    shard_v=shard_v,
+                )
+
+            if missing_u or missing_v:
+                logging.warning(
+                    "Missing nodes in tile %s: missing_u=%s missing_v=%s "
+                    "sample_u=%s sample_v=%s",
+                    file_path,
+                    missing_u,
+                    missing_v,
+                    missing_u_samples,
+                    missing_v_samples,
+                )
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
@@ -211,7 +303,15 @@ def _attach_shard_u(element: Tuple[int, dict]):
     for edge in edges_iter:
         saw_edge = True
         if node is None:
-            raise ValueError(f"Node {node_id} referenced by edge(s) but not found in nodes input.")
+            Metrics.counter("job0", "missing_u_nodes").inc()
+            logging.warning(
+                "Node %s referenced as edge source but not found in nodes input.",
+                node_id,
+            )
+            Metrics.counter("job0", "missing_u_edges_dropped").inc()
+            for _ in edges_iter:
+                Metrics.counter("job0", "missing_u_edges_dropped").inc()
+            return
         shard_u = _compute_shard_id(node.x, node.y)
         yield (
             edge.v,
@@ -245,9 +345,15 @@ def _attach_shard_v(element: Tuple[int, dict]):
     for edge in edges_iter:
         saw_edge = True
         if node is None:
-            raise ValueError(
-                f"Node {node_id} referenced as edge target but not found in nodes input."
+            Metrics.counter("job0", "missing_v_nodes").inc()
+            logging.warning(
+                "Node %s referenced as edge target but not found in nodes input.",
+                node_id,
             )
+            Metrics.counter("job0", "missing_v_edges_dropped").inc()
+            for _ in edges_iter:
+                Metrics.counter("job0", "missing_v_edges_dropped").inc()
+            return
         shard_v = _compute_shard_id(node.x, node.y)
         yield EdgeWithShards(
             u=edge.u,
@@ -376,30 +482,11 @@ def create_job0_pipeline(
     boundary_schema = pa.schema([("node_id", pa.int64())])
 
     with beam.Pipeline(options=options) as p:
-        parsed = (
+        edges_with_shards = (
             p
             | "MatchPbfFiles" >> fileio.MatchFiles(input_pbf)
             | "ReadPbfMatches" >> fileio.ReadMatches()
-            | "ParsePbfFiles" >> beam.ParDo(ParsePbfDoFn()).with_outputs("nodes", "edges")
-        )
-
-        nodes = parsed.nodes
-        edges = parsed.edges
-
-        node_kv = nodes | "KeyNodesById" >> beam.Map(lambda n: (n.id, n))
-        node_dedup = node_kv | "DedupNodesById" >> beam.CombinePerKey(_first_or_none)
-
-        edges_by_u = edges | "KeyEdgesByU" >> beam.Map(lambda e: (e.u, e))
-        edges_with_u = (
-            {"nodes": node_dedup, "edges": edges_by_u}
-            | "JoinEdgesWithU" >> beam.CoGroupByKey()
-            | "AttachShardU" >> beam.FlatMap(_attach_shard_u)
-        )
-
-        edges_with_shards = (
-            {"nodes": node_dedup, "edges_with_u": edges_with_u}
-            | "JoinEdgesWithV" >> beam.CoGroupByKey()
-            | "AttachShardV" >> beam.FlatMap(_attach_shard_v)
+            | "ParseAndEnrichTiles" >> beam.ParDo(ParseAndEnrichTileDoFn())
         )
 
         weighted = edges_with_shards | "ComputeWeightsAndNodes" >> beam.ParDo(
