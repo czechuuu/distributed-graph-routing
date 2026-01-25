@@ -1,0 +1,11 @@
+# Benchmark Summary Results - 2026-01-25T17:42:44.963894
+# URL: http://34.170.114.20:80
+# Runs per test: 1
+#
+CATEGORY	TEST_NAME	QUERY_TYPE	COUNT	SUCCESS	MEAN_MS	STD_MS	MIN_MS	MAX_MS	MEDIAN_MS	P95_MS	AVG_DIST_M
+small_town	Pabianice	cached	1	1	942.72	0.00	942.72	942.72	942.72	942.72	81.00
+small_town	Pabianice	first	1	1	963.50	0.00	963.50	963.50	963.50	963.50	81.00
+small_town	Sopot	cached	1	1	262.96	0.00	262.96	262.96	262.96	262.96	279.00
+small_town	Sopot	first	1	1	245.63	0.00	245.63	245.63	245.63	245.63	279.00
+small_town	Wieliczka	cached	1	1	1257.09	0.00	1257.09	1257.09	1257.09	1257.09	106.00
+small_town	Wieliczka	first	1	1	1259.09	0.00	1259.09	1259.09	1259.09	1259.09	106.00

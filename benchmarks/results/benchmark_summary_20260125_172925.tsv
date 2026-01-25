@@ -1,0 +1,23 @@
+# Benchmark Summary Results - 2026-01-25T17:29:25.471724
+# URL: http://34.170.114.20:80
+# Runs per test: 3
+#
+CATEGORY	TEST_NAME	QUERY_TYPE	COUNT	SUCCESS	MEAN_MS	STD_MS	MIN_MS	MAX_MS	MEDIAN_MS	P95_MS	AVG_DIST_M
+cross_shard	Krakow-Wroclaw	cached	3	3	561.09	61.73	524.82	632.37	526.09	632.37	0.00
+cross_shard	Krakow-Wroclaw	first	3	3	524.53	1.73	522.53	525.55	525.50	525.55	0.00
+cross_shard	Poznan-Lodz	cached	3	3	508.83	12.03	501.84	522.72	501.94	522.72	0.00
+cross_shard	Poznan-Lodz	first	3	3	1133.97	967.04	551.97	2250.27	599.68	2250.27	0.00
+cross_shard	Warsaw-Gdansk	cached	3	3	1655.90	85.11	1557.73	1708.74	1701.23	1708.74	11828.00
+cross_shard	Warsaw-Gdansk	first	3	3	1809.76	23.48	1794.03	1836.75	1798.49	1836.75	11828.00
+large_city	Krakow-OldTown	cached	3	3	704.21	90.23	603.20	776.79	732.66	776.79	0.00
+large_city	Krakow-OldTown	first	3	3	724.77	104.33	627.32	834.82	712.18	834.82	0.00
+large_city	Warsaw-Central	cached	3	3	1681.63	64.77	1623.77	1751.60	1669.51	1751.60	79.00
+large_city	Warsaw-Central	first	3	3	2641.35	1544.40	1674.96	4422.52	1826.58	4422.52	79.00
+large_city	Wroclaw-Center	cached	3	3	762.34	65.51	723.53	837.98	725.51	837.98	204.00
+large_city	Wroclaw-Center	first	3	3	841.97	98.12	744.26	940.50	841.17	940.50	204.00
+small_town	Pabianice	cached	3	3	907.50	57.52	841.19	943.86	937.46	943.86	81.00
+small_town	Pabianice	first	3	3	908.12	44.91	857.61	943.55	923.21	943.55	81.00
+small_town	Sopot	cached	3	3	278.43	47.48	240.23	331.59	263.46	331.59	279.00
+small_town	Sopot	first	3	3	251.45	14.85	235.00	263.87	255.49	263.87	279.00
+small_town	Wieliczka	cached	3	3	1162.59	24.01	1148.08	1190.31	1149.39	1190.31	106.00
+small_town	Wieliczka	first	3	3	1213.19	135.18	1119.23	1368.12	1152.23	1368.12	106.00

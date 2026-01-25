@@ -1,0 +1,13 @@
+# Benchmark Summary Results - 2026-01-25T17:41:21.696108
+# URL: http://34.170.114.20:80
+# Runs per test: 1
+#
+CATEGORY	TEST_NAME	QUERY_TYPE	COUNT	SUCCESS	MEAN_MS	STD_MS	MIN_MS	MAX_MS	MEDIAN_MS	P95_MS	AVG_DIST_M
+cross_shard	Krakow-Sopot	cached	1	1	218.55	0.00	218.55	218.55	218.55	218.55	0.00
+cross_shard	Krakow-Sopot	first	1	1	219.37	0.00	219.37	219.37	219.37	219.37	0.00
+cross_shard	Krakow-Wroclaw	cached	1	1	517.67	0.00	517.67	517.67	517.67	517.67	0.00
+cross_shard	Krakow-Wroclaw	first	1	1	585.25	0.00	585.25	585.25	585.25	585.25	0.00
+cross_shard	Poznan-Lodz	cached	1	1	517.70	0.00	517.70	517.70	517.70	517.70	0.00
+cross_shard	Poznan-Lodz	first	1	1	516.15	0.00	516.15	516.15	516.15	516.15	0.00
+cross_shard	Warsaw-Gdansk	cached	1	1	1654.54	0.00	1654.54	1654.54	1654.54	1654.54	11828.00
+cross_shard	Warsaw-Gdansk	first	1	1	4548.63	0.00	4548.63	4548.63	4548.63	4548.63	11828.00

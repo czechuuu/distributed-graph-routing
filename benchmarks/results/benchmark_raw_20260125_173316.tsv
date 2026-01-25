@@ -1,0 +1,59 @@
+# Benchmark Raw Results - 2026-01-25T17:33:16.261745
+# URL: http://34.170.114.20:80
+# Runs per test: 3
+#
+CATEGORY	TEST_NAME	QUERY_TYPE	RUN	LATENCY_MS	SUCCESS	PATH_FOUND	DISTANCE_M	SEGMENTS	ERROR
+small_town	Pabianice	first	1	944.84	True	True	81.00	1	
+small_town	Pabianice	cached	1	1041.99	True	True	81.00	1	
+small_town	Pabianice	first	2	943.63	True	True	81.00	1	
+small_town	Pabianice	cached	2	839.65	True	True	81.00	1	
+small_town	Pabianice	first	3	939.54	True	True	81.00	1	
+small_town	Pabianice	cached	3	849.89	True	True	81.00	1	
+small_town	Wieliczka	first	1	1141.44	True	True	106.00	1	
+small_town	Wieliczka	cached	1	1049.46	True	True	106.00	1	
+small_town	Wieliczka	first	2	1047.51	True	True	106.00	1	
+small_town	Wieliczka	cached	2	1152.94	True	True	106.00	1	
+small_town	Wieliczka	first	3	1152.10	True	True	106.00	1	
+small_town	Wieliczka	cached	3	1154.14	True	True	106.00	1	
+small_town	Sopot	first	1	313.65	True	True	279.00	1	
+small_town	Sopot	cached	1	248.99	True	True	279.00	1	
+small_town	Sopot	first	2	249.61	True	True	279.00	1	
+small_town	Sopot	cached	2	246.19	True	True	279.00	1	
+small_town	Sopot	first	3	262.06	True	True	279.00	1	
+small_town	Sopot	cached	3	262.49	True	True	279.00	1	
+large_city	Warsaw-Central	first	1	1880.19	True	True	79.00	1	
+large_city	Warsaw-Central	cached	1	1674.41	True	True	79.00	1	
+large_city	Warsaw-Central	first	2	1671.72	True	True	79.00	1	
+large_city	Warsaw-Central	cached	2	1570.77	True	True	79.00	1	
+large_city	Warsaw-Central	first	3	1989.19	True	True	79.00	1	
+large_city	Warsaw-Central	cached	3	1778.40	True	True	79.00	1	
+large_city	Krakow-OldTown	first	1	626.14	True	False	0.00	0	
+large_city	Krakow-OldTown	cached	1	802.22	True	False	0.00	0	
+large_city	Krakow-OldTown	first	2	771.02	True	False	0.00	0	
+large_city	Krakow-OldTown	cached	2	629.39	True	False	0.00	0	
+large_city	Krakow-OldTown	first	3	735.17	True	False	0.00	0	
+large_city	Krakow-OldTown	cached	3	838.49	True	False	0.00	0	
+large_city	Wroclaw-Center	first	1	838.49	True	True	204.00	1	
+large_city	Wroclaw-Center	cached	1	835.23	True	True	204.00	1	
+large_city	Wroclaw-Center	first	2	839.05	True	True	204.00	1	
+large_city	Wroclaw-Center	cached	2	811.01	True	True	204.00	1	
+large_city	Wroclaw-Center	first	3	759.13	True	True	204.00	1	
+large_city	Wroclaw-Center	cached	3	906.74	True	True	204.00	1	
+cross_shard	Warsaw-Gdansk	first	1	1815.67	True	True	11828.00	51	
+cross_shard	Warsaw-Gdansk	cached	1	1681.04	True	True	11828.00	51	
+cross_shard	Warsaw-Gdansk	first	2	1875.29	True	True	11828.00	51	
+cross_shard	Warsaw-Gdansk	cached	2	1754.76	True	True	11828.00	51	
+cross_shard	Warsaw-Gdansk	first	3	1593.80	True	True	11828.00	51	
+cross_shard	Warsaw-Gdansk	cached	3	1463.86	True	True	11828.00	51	
+cross_shard	Krakow-Wroclaw	first	1	419.98	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	cached	1	469.34	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	first	2	474.73	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	cached	2	524.38	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	first	3	525.56	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	cached	3	490.45	True	False	0.00	0	
+cross_shard	Poznan-Lodz	first	1	557.74	True	False	0.00	0	
+cross_shard	Poznan-Lodz	cached	1	509.57	True	False	0.00	0	
+cross_shard	Poznan-Lodz	first	2	540.32	True	False	0.00	0	
+cross_shard	Poznan-Lodz	cached	2	524.65	True	False	0.00	0	
+cross_shard	Poznan-Lodz	first	3	500.10	True	False	0.00	0	
+cross_shard	Poznan-Lodz	cached	3	548.06	True	False	0.00	0	

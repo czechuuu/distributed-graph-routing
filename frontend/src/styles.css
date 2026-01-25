@@ -242,7 +242,7 @@ button:disabled {
   border-radius: 6px;
 }
 
-/* Route summary - distance only */
+/* Route summary - travel time */
 .route-summary {
   position: absolute;
   bottom: 1.5rem;

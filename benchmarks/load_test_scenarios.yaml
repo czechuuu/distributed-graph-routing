@@ -1,0 +1,24 @@
+# Load Test Scenarios Configuration
+#
+# Pre-configured load test scenarios for different stress levels
+
+scenarios:
+  - name: "light"
+    description: "Light load - for initial testing"
+    concurrency: 5
+    total_requests: 20
+
+  - name: "medium"
+    description: "Medium load - moderate stress"
+    concurrency: 20
+    total_requests: 100
+
+  - name: "heavy"
+    description: "Heavy load - stress testing"
+    concurrency: 50
+    total_requests: 200
+
+  - name: "burst"
+    description: "Burst test - short intense load"
+    concurrency: 100
+    total_requests: 100

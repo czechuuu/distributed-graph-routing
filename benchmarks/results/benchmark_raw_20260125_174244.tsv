@@ -1,0 +1,11 @@
+# Benchmark Raw Results - 2026-01-25T17:42:44.965078
+# URL: http://34.170.114.20:80
+# Runs per test: 1
+#
+CATEGORY	TEST_NAME	QUERY_TYPE	RUN	LATENCY_MS	SUCCESS	PATH_FOUND	DISTANCE_M	SEGMENTS	ERROR
+small_town	Pabianice	first	1	963.50	True	True	81.00	1	
+small_town	Pabianice	cached	1	942.72	True	True	81.00	1	
+small_town	Wieliczka	first	1	1259.09	True	True	106.00	1	
+small_town	Wieliczka	cached	1	1257.09	True	True	106.00	1	
+small_town	Sopot	first	1	245.63	True	True	279.00	1	
+small_town	Sopot	cached	1	262.96	True	True	279.00	1	

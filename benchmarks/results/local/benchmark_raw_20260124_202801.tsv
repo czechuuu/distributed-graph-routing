@@ -1,0 +1,11 @@
+# Benchmark Raw Results - 2026-01-24T20:28:01.930713
+# URL: http://localhost:8080
+# Runs per test: 1
+#
+CATEGORY	TEST_NAME	QUERY_TYPE	RUN	LATENCY_MS	SUCCESS	PATH_FOUND	DISTANCE_M	SEGMENTS	ERROR
+large_city	Warsaw-Central	first	1	10154.89	True	True	1087.00	1	
+large_city	Warsaw-Central	cached	1	1838.89	True	True	1087.00	1	
+large_city	Krakow-OldTown	first	1	8676.88	True	False	0.00	0	
+large_city	Krakow-OldTown	cached	1	707.88	True	False	0.00	0	
+large_city	Wroclaw-Center	first	1	7714.53	True	True	2346.00	1	
+large_city	Wroclaw-Center	cached	1	734.54	True	True	2346.00	1	
