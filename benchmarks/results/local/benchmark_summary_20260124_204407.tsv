@@ -1,0 +1,11 @@
+# Benchmark Summary Results - 2026-01-24T20:44:07.021014
+# URL: http://localhost:8080
+# Runs per test: 1
+#
+CATEGORY	TEST_NAME	QUERY_TYPE	COUNT	SUCCESS	MEAN_MS	STD_MS	MIN_MS	MAX_MS	MEDIAN_MS	P95_MS	AVG_DIST_M
+cross_shard	Krakow-Wroclaw	cached	1	1	396.48	0.00	396.48	396.48	396.48	396.48	0.00
+cross_shard	Krakow-Wroclaw	first	1	1	13564.93	0.00	13564.93	13564.93	13564.93	13564.93	0.00
+cross_shard	Poznan-Lodz	cached	1	1	373.52	0.00	373.52	373.52	373.52	373.52	0.00
+cross_shard	Poznan-Lodz	first	1	1	12829.46	0.00	12829.46	12829.46	12829.46	12829.46	0.00
+cross_shard	Warsaw-Gdansk	cached	1	1	2719.22	0.00	2719.22	2719.22	2719.22	2719.22	323824.00
+cross_shard	Warsaw-Gdansk	first	1	1	15584.48	0.00	15584.48	15584.48	15584.48	15584.48	323824.00
