@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import tempfile
 from typing import Iterable, NamedTuple, Optional, Tuple
 
@@ -34,6 +35,10 @@ DRIVEABLE_HIGHWAY_TYPES = {
 }
 
 S2_LEVEL = 9
+TILE_OVERLAP_KM = 2.0
+KM_PER_DEG_LAT = 111.32
+TILE_OVERLAP_DEG = TILE_OVERLAP_KM / KM_PER_DEG_LAT
+_TILE_FILENAME_RE = re.compile(r"tile_(.+)\.osm\.pbf$")
 
 
 class NodeRow(NamedTuple):
@@ -138,6 +143,43 @@ def _min_edge_from_iter(values: Iterable[EdgeSlim]) -> Optional[EdgeSlim]:
     return best
 
 
+def _decode_coord(token: str) -> float:
+    is_negative = token.startswith("m")
+    if is_negative:
+        token = token[1:]
+    token = token.replace("_", ".")
+    value = float(token)
+    return -value if is_negative else value
+
+
+def _parse_tile_bbox(path: str) -> Tuple[float, float, float, float]:
+    filename = path.rsplit("/", 1)[-1]
+    match = _TILE_FILENAME_RE.match(filename)
+    if not match:
+        raise ValueError(f"Unrecognized tile filename: {path}")
+    coords_str = match.group(1)
+    parts = re.findall(r"m?\d+(?:_\d+)?", coords_str)
+    if len(parts) != 4:
+        raise ValueError(f"Expected 4 coords in tile filename: {path}")
+    min_lat, min_lon, max_lat, max_lon = (_decode_coord(part) for part in parts)
+    return min_lon, min_lat, max_lon, max_lat
+
+
+def _core_bbox_from_tile(path: str) -> Tuple[float, float, float, float]:
+    min_lon, min_lat, max_lon, max_lat = _parse_tile_bbox(path)
+    return (
+        min_lon + TILE_OVERLAP_DEG,
+        min_lat + TILE_OVERLAP_DEG,
+        max_lon - TILE_OVERLAP_DEG,
+        max_lat - TILE_OVERLAP_DEG,
+    )
+
+
+def _is_in_core(lon: float, lat: float, core_bbox: Tuple[float, float, float, float]) -> bool:
+    min_lon, min_lat, max_lon, max_lat = core_bbox
+    return min_lon <= lon < max_lon and min_lat <= lat < max_lat
+
+
 class _PbfHandler(osmium.SimpleHandler):
     def __init__(self):
         super().__init__()
@@ -208,6 +250,11 @@ class ParseAndEnrichTileDoFn(beam.DoFn):
         tmp_path = None
         file_path = getattr(readable_file.metadata, "path", "unknown")
         try:
+            core_bbox = _core_bbox_from_tile(file_path)
+        except ValueError as exc:
+            logging.error("Failed to parse tile bbox from %s: %s", file_path, exc)
+            raise
+        try:
             with readable_file.open() as handle, tempfile.NamedTemporaryFile(
                 suffix=".osm.pbf", delete=False
             ) as tmp:
@@ -232,11 +279,22 @@ class ParseAndEnrichTileDoFn(beam.DoFn):
 
             Metrics.counter("job0", "tile_nodes_total").inc(len(node_map))
             Metrics.distribution("job0", "tile_nodes_count").update(len(node_map))
+            owned_nodes = 0
+            for node_id, (x, y, shard_id) in node_map.items():
+                if not _is_in_core(x, y, core_bbox):
+                    continue
+                owned_nodes += 1
+                Metrics.counter("job0", "owned_nodes_emitted").inc()
+                yield beam.pvalue.TaggedOutput(
+                    "nodes", NodeOut(id=node_id, x=x, y=y, shard_id=shard_id)
+                )
+            Metrics.distribution("job0", "tile_owned_nodes").update(owned_nodes)
 
             missing_u = 0
             missing_v = 0
             missing_u_samples: list[int] = []
             missing_v_samples: list[int] = []
+            owned_edges = 0
 
             for edge in handler.edges:
                 Metrics.counter("job0", "tile_edges_total").inc()
@@ -257,9 +315,14 @@ class ParseAndEnrichTileDoFn(beam.DoFn):
                 if node_u is None or node_v is None:
                     continue
 
-                Metrics.counter("job0", "tile_edges_emitted").inc()
                 x_u, y_u, shard_u = node_u
+                if not _is_in_core(x_u, y_u, core_bbox):
+                    continue
+
+                Metrics.counter("job0", "tile_edges_emitted").inc()
                 x_v, y_v, shard_v = node_v
+                owned_edges += 1
+                Metrics.counter("job0", "owned_edges_emitted").inc()
                 yield EdgeWithShards(
                     u=edge.u,
                     v=edge.v,
@@ -279,6 +342,7 @@ class ParseAndEnrichTileDoFn(beam.DoFn):
                     shard_v=shard_v,
                 )
 
+            Metrics.distribution("job0", "tile_owned_edges").update(owned_edges)
             if missing_u or missing_v:
                 logging.warning(
                     "Missing nodes in tile %s: missing_u=%s missing_v=%s "
@@ -405,14 +469,6 @@ class ComputeWeightAndNodes(beam.DoFn):
             shard_u=edge.shard_u,
             shard_v=edge.shard_v,
         )
-        yield beam.pvalue.TaggedOutput(
-            "nodes",
-            NodeOut(id=edge.u, x=edge.x_u, y=edge.y_u, shard_id=edge.shard_u),
-        )
-        yield beam.pvalue.TaggedOutput(
-            "nodes",
-            NodeOut(id=edge.v, x=edge.x_v, y=edge.y_v, shard_id=edge.shard_v),
-        )
 
 
 def _destination_for_shard(prefix: str, shard_id: int) -> str:
@@ -482,38 +538,23 @@ def create_job0_pipeline(
     boundary_schema = pa.schema([("node_id", pa.int64())])
 
     with beam.Pipeline(options=options) as p:
-        edges_with_shards = (
+        parsed = (
             p
             | "MatchPbfFiles" >> fileio.MatchFiles(input_pbf)
             | "ReadPbfMatches" >> fileio.ReadMatches()
-            | "ParseAndEnrichTiles" >> beam.ParDo(ParseAndEnrichTileDoFn())
+            | "ParseAndEnrichTiles" >> beam.ParDo(ParseAndEnrichTileDoFn()).with_outputs("nodes")
         )
+        edges_with_shards = parsed[None]
+        node_out = parsed.nodes
 
-        weighted = edges_with_shards | "ComputeWeightsAndNodes" >> beam.ParDo(
+        edge_slim = edges_with_shards | "ComputeWeights" >> beam.ParDo(
             ComputeWeightAndNodes(weight_mode)
-        ).with_outputs("nodes")
-
-        edge_slim = weighted[None]
-        node_out = weighted.nodes
-
-        node_out_dedup = (
-            node_out
-            | "KeyOutputNodes" >> beam.Map(lambda n: (n.id, n))
-            | "DedupOutputNodes" >> beam.CombinePerKey(_first_or_none)
-            | "DropOutputNodeKeys" >> beam.Map(lambda kv: kv[1])
         )
 
-        edge_kv = edge_slim | "KeyEdgesByUV" >> beam.Map(lambda e: ((e.u, e.v), e))
-        edge_dedup = (
-            edge_kv
-            | "DedupEdgesByUV" >> beam.CombinePerKey(_min_edge_from_iter)
-            | "DropEdgeKeys" >> beam.Map(lambda kv: kv[1])
-        )
-
-        internal_edges = edge_dedup | "FilterInternalEdges" >> beam.Filter(
+        internal_edges = edge_slim | "FilterInternalEdges" >> beam.Filter(
             lambda e: e.shard_u == e.shard_v
         )
-        bridges = edge_dedup | "FilterBridgeEdges" >> beam.Filter(
+        bridges = edge_slim | "FilterBridgeEdges" >> beam.Filter(
             lambda e: e.shard_u != e.shard_v
         )
 
@@ -542,7 +583,7 @@ def create_job0_pipeline(
             destination_fn=lambda e: _destination_for_shard("edges", e.shard_u),
         )
 
-        _ = node_out_dedup | "WriteShardNodes" >> WriteToParquetByDestination(
+        _ = node_out | "WriteShardNodes" >> WriteToParquetByDestination(
             base_path=output_base,
             schema=node_schema,
             destination_fn=lambda n: _destination_for_shard("nodes", n.shard_id),
