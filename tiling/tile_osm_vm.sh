@@ -264,6 +264,11 @@ PYTHON
   for batch_tiles in "$batches_dir"/batch_*.csv; do
     wait_for_slot
     (
+      # Important: prevent subshells from running the parent's EXIT trap.
+      # Otherwise, when a background batch exits (or gets OOM-killed), it could delete
+      # the shared work_dir (including highways.osm.pbf) while other batches are running.
+      trap - EXIT
+
       local batch_name config_json batch_out_dir
       batch_name="$(basename "$batch_tiles" .csv)"
       config_json="$batches_dir/${batch_name}.json"

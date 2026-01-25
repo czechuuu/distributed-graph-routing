@@ -62,7 +62,10 @@ uv run python -m dataflow.job0_main \
   --runner=DataflowRunner \
   --setup_file=setup.py \
   --input_pbf="gs://rsp_graph_data_test/v2/osm_tiles/*.osm.pbf" \
-  --output_base="gs://rsp_graph_data_test/v2/processed"
+  --output_base="gs://rsp_graph_data_test/v2/processed" \
+  --worker_machine_type=n2-standard-2 \
+  --autoscaling_algorithm=THROUGHPUT_BASED \
+  --max_num_workers=12
 ```
 
 You can specify the weight mode with `--weight_mode=time_s|distance_m` (default: `time_s`).
