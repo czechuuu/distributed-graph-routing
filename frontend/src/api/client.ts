@@ -6,13 +6,14 @@ import type {
   Segment,
 } from './types'
 
-async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+async function fetchJson<T>(input: RequestInfo, init?: RequestInit, signal?: AbortSignal): Promise<T> {
   const response = await fetch(input, {
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers ?? {}),
     },
     ...init,
+    signal,
   })
 
   const contentType = response.headers.get('content-type') ?? ''
@@ -34,15 +35,16 @@ async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
   return payload as T
 }
 
-export function fetchRoute(request: RouteRequest): Promise<RouteResponse> {
+export function fetchRoute(request: RouteRequest, signal?: AbortSignal): Promise<RouteResponse> {
   return fetchJson<RouteResponse>('/v1/route', {
     method: 'POST',
     body: JSON.stringify(request),
-  })
+  }, signal)
 }
 
 export function expandSegments(
   segments: Segment[],
+  signal?: AbortSignal,
 ): Promise<RouteExpandResponse> {
   const payload: RouteExpandRequest = {
     segments: segments.map((segment) => ({
@@ -53,5 +55,5 @@ export function expandSegments(
   return fetchJson<RouteExpandResponse>('/v1/route/expand', {
     method: 'POST',
     body: JSON.stringify(payload),
-  })
+  }, signal)
 }
