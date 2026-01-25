@@ -1,0 +1,23 @@
+# Benchmark Raw Results - 2026-01-25T14:16:00.661362
+# URL: http://34.170.114.20:80
+# Runs per test: 3
+#
+CATEGORY	TEST_NAME	QUERY_TYPE	RUN	LATENCY_MS	SUCCESS	PATH_FOUND	DISTANCE_M	SEGMENTS	ERROR
+cross_shard	Warsaw-Gdansk	first	1	5768.55	True	True	323824.00	47	
+cross_shard	Warsaw-Gdansk	cached	1	1672.95	True	True	323824.00	47	
+cross_shard	Warsaw-Gdansk	first	2	1867.23	True	True	323824.00	47	
+cross_shard	Warsaw-Gdansk	cached	2	1924.13	True	True	323824.00	47	
+cross_shard	Warsaw-Gdansk	first	3	1786.89	True	True	323824.00	47	
+cross_shard	Warsaw-Gdansk	cached	3	1893.82	True	True	323824.00	47	
+cross_shard	Krakow-Wroclaw	first	1	4093.90	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	cached	1	528.98	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	first	2	459.11	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	cached	2	488.82	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	first	3	528.56	True	False	0.00	0	
+cross_shard	Krakow-Wroclaw	cached	3	469.08	True	False	0.00	0	
+cross_shard	Poznan-Lodz	first	1	2788.75	True	False	0.00	0	
+cross_shard	Poznan-Lodz	cached	1	527.46	True	False	0.00	0	
+cross_shard	Poznan-Lodz	first	2	526.65	True	False	0.00	0	
+cross_shard	Poznan-Lodz	cached	2	493.22	True	False	0.00	0	
+cross_shard	Poznan-Lodz	first	3	563.12	True	False	0.00	0	
+cross_shard	Poznan-Lodz	cached	3	526.41	True	False	0.00	0	

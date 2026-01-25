@@ -90,6 +90,50 @@ test_cases:
 | `large_city` | Same-shard routing in large urban areas |
 | `cross_shard` | Routes spanning multiple shards |
 
+## Load Testing (Stress Testing)
+
+Send concurrent requests to measure throughput, latency under load, and error rates.
+
+### Basic Usage
+
+```bash
+# 10 concurrent requests, 50 total
+python -m benchmarks.run_load_test --concurrency 10 --total-requests 50
+
+# Use a pre-defined scenario with warmup
+python -m benchmarks.run_load_test --scenario medium --warmup
+
+# Test against GKE
+python -m benchmarks.run_load_test --url http://35.x.x.x --port 80 --scenario heavy
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--concurrency` | `10` | Number of parallel requests |
+| `--total-requests` | `50` | Total requests to send |
+| `--scenario` | `None` | Pre-defined: `light`, `medium`, `heavy`, `burst` |
+| `--test-case` | `Warsaw-Gdansk` | Test case to use |
+| `--warmup` | `False` | Send warmup request first |
+| `--timeout` | `60.0` | Request timeout (seconds) |
+
+### Pre-defined Scenarios
+
+| Scenario | Concurrency | Total Requests |
+|----------|-------------|----------------|
+| `light` | 5 | 20 |
+| `medium` | 20 | 100 |
+| `heavy` | 50 | 200 |
+| `burst` | 100 | 100 |
+
+### Output
+
+- `load_test_summary_*.tsv` - Throughput, p50/p95/p99 latencies, error rate
+- `load_test_timeline_*.tsv` - Per-request data for graphing
+
+---
+
 ## Extending the Framework
 
 ### Adding New Test Cases
@@ -101,5 +145,3 @@ Extend `metrics.py:QueryResult` and `MetricsCollector`.
 ### Custom Reporters
 Implement a new reporter in `reporter.py` or create a new module.
 
-### Future: Stress Testing
-The architecture supports adding a `--concurrent` flag for parallel requests.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -23,7 +24,10 @@ class RouteResult:
 
 
 class RoutingClient:
-    """Client for the distributed graph routing API."""
+    """Client for the distributed graph routing API.
+    
+    Thread-safe: uses thread-local sessions for concurrent requests.
+    """
 
     def __init__(self, base_url: str, timeout: float = 60.0):
         """
@@ -35,7 +39,13 @@ class RoutingClient:
         """
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.session = requests.Session()
+        self._local = threading.local()
+
+    def _get_session(self) -> requests.Session:
+        """Get thread-local session, creating one if needed."""
+        if not hasattr(self._local, "session"):
+            self._local.session = requests.Session()
+        return self._local.session
 
     def route(self, start_lat: float, start_lng: float, end_lat: float, end_lng: float) -> RouteResult:
         """
@@ -58,7 +68,7 @@ class RoutingClient:
 
         start_time = time.perf_counter()
         try:
-            response = self.session.post(url, json=payload, timeout=self.timeout)
+            response = self._get_session().post(url, json=payload, timeout=self.timeout)
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             if response.status_code != 200:
@@ -115,11 +125,12 @@ class RoutingClient:
     def health_check(self) -> bool:
         """Check if the API is reachable."""
         try:
-            response = self.session.get(f"{self.base_url}/healthz", timeout=5.0)
+            response = self._get_session().get(f"{self.base_url}/healthz", timeout=5.0)
             return response.status_code == 200
         except Exception:
             return False
 
     def close(self) -> None:
-        """Close the session."""
-        self.session.close()
+        """Close thread-local sessions (call from each thread if needed)."""
+        if hasattr(self._local, "session"):
+            self._local.session.close()
