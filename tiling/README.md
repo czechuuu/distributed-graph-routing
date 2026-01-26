@@ -19,13 +19,13 @@ From repo root:
 
 ```bash
 chmod +x tiling/tile_osm_vm.sh
-OUTPUT_DIR=./osm_tiles_vm SPLIT_GRID_N=auto TARGET_LEAF_BYTES=1073741824 ./tiling/tile_osm_vm.sh europe
+OUTPUT_DIR=./osm_tiles_vm SPLIT_GRID_N=auto TARGET_LEAF_BYTES=104857600 ./tiling/tile_osm_vm.sh europe
 ```
 
 Upload to GCS (requires `gsutil`):
 
 ```bash
-OUTPUT_DIR=./osm_tiles_vm SPLIT_GRID_N=auto TARGET_LEAF_BYTES=1073741824 ./tiling/tile_osm_vm.sh europe gs://rsp_graph_data_test/v2/osm_tiles
+OUTPUT_DIR=./osm_tiles_vm SPLIT_GRID_N=auto TARGET_LEAF_BYTES=104857600 ./tiling/tile_osm_vm.sh europe gs://rsp_graph_data_test/v2/osm_tiles
 ```
 
 Note: when `gcs_path` is provided, the script **uploads and deletes outputs** (it does not keep all tiles locally).
@@ -120,7 +120,7 @@ export TILES_PREFIX="v3/osm_tiles"
 export OUTPUT_DIR="$HOME/osm_tiles_work"
 export CACHE_DIR="$HOME/osm_pbf_cache"
 export SPLIT_GRID_N="auto"
-export TARGET_LEAF_BYTES="1073741824"
+export TARGET_LEAF_BYTES="104857600"
 export RAISE_NOFILE="65535"
 
 ./tiling/tile_osm_vm.sh europe "gs://$BUCKET/$TILES_PREFIX"
@@ -138,6 +138,6 @@ gcloud compute instances delete "$VM_NAME" --zone="$ZONE"
 
 - **Start conservative**:
   - `SPLIT_GRID_N=auto`
-  - `TARGET_LEAF_BYTES=1073741824` (1 GiB)
+  - `TARGET_LEAF_BYTES=104857600` (100 MB)
 - If you see “too many open files” errors:
   - lower `MAX_SPLIT_GRID_N`, or set `RAISE_NOFILE=65535`

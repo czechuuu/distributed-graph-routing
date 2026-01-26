@@ -65,6 +65,7 @@ uv run python -m dataflow.job0_main \
   --output_base="gs://rsp_graph_data_test/v2/processed" \
   --worker_machine_type=n2-standard-2 \
   --autoscaling_algorithm=THROUGHPUT_BASED \
+  --num_workers=6 \
   --max_num_workers=12
 ```
 

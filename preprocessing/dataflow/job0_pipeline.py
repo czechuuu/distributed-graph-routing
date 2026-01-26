@@ -10,6 +10,7 @@ import pyarrow as pa
 from apache_beam.io import fileio
 from apache_beam.metrics import Metrics
 from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
+from apache_beam.transforms.util import Reshuffle
 from s2sphere import CellId, LatLng
 
 from .io_wrappers import WriteParquet, WriteToParquetByDestination
@@ -538,11 +539,20 @@ def create_job0_pipeline(
     boundary_schema = pa.schema([("node_id", pa.int64())])
 
     with beam.Pipeline(options=options) as p:
-        parsed = (
+        # Break fusion between file matching/reading/parsing so that each tile file can
+        # become an independent work item and Dataflow can scale out.
+        matches = (
             p
             | "MatchPbfFiles" >> fileio.MatchFiles(input_pbf)
+            | "KeyPbfMatchesByPath" >> beam.Map(lambda m: (m.path, m))
+            | "ReshufflePbfMatches" >> Reshuffle()
+            | "UnkeyPbfMatches" >> beam.Values()
+        )
+        parsed = (
+            matches
             | "ReadPbfMatches" >> fileio.ReadMatches()
-            | "ParseAndEnrichTiles" >> beam.ParDo(ParseAndEnrichTileDoFn()).with_outputs("nodes")
+            | "ParseAndEnrichTiles"
+            >> beam.ParDo(ParseAndEnrichTileDoFn()).with_outputs("nodes")
         )
         edges_with_shards = parsed[None]
         node_out = parsed.nodes
