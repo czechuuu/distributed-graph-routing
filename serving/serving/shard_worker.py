@@ -3,7 +3,6 @@ from __future__ import annotations
 import threading
 from concurrent import futures
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Dict, List
 
 import grpc
 
@@ -11,7 +10,7 @@ from .config import load_shard_worker_config
 from .dijkstra import dijkstra_path, dijkstra_targets
 from .gcs import download_shard
 from .shard_cache import ShardCache, ShardData, parse_shard
-from shared.protos import gcs_storage_pb2, shard_worker_pb2, shard_worker_pb2_grpc
+from shared.protos import shard_worker_pb2, shard_worker_pb2_grpc
 
 
 class _HealthHandler(BaseHTTPRequestHandler):

@@ -1,7 +1,7 @@
 [project]
 name = "scripts"
 version = "0.1.0"
-description = ""
+description = "Utility scripts for OSM tiling, protobuf generation, and diagram creation"
 requires-python = ">=3.11"
 dependencies = [
     "google-cloud-storage>=2.18.0",

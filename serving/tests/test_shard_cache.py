@@ -1,6 +1,5 @@
 """Tests for the ShardCache and ShardData classes."""
 
-import pytest
 
 from serving.shard_cache import ShardCache, ShardData
 

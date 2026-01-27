@@ -1,15 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
-
 from google.cloud import storage
-
-
-@dataclass(frozen=True)
-class GcsPath:
-    bucket: str
-    blob: str
 
 
 def download_bytes(bucket: str, blob: str) -> bytes:

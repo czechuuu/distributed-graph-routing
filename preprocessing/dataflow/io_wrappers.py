@@ -5,7 +5,6 @@ from apache_beam.io import fileio
 from apache_beam.io.gcp.bigquery import ReadFromBigQuery
 from apache_beam.io.gcp.bigtableio import WriteToBigTable
 from apache_beam.io.parquetio import ReadFromParquet, WriteToParquet as BeamWriteToParquet
-from google.cloud.bigtable import row
 
 class ReadNodesFromBQ(beam.PTransform):
     def __init__(self, table):

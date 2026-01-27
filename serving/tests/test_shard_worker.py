@@ -1,6 +1,5 @@
 """Tests for the ShardWorkerService gRPC service."""
 
-from unittest.mock import MagicMock, patch
 
 import pytest
 

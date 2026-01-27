@@ -133,11 +133,3 @@ Stop paying for the VM when done:
 ```bash
 gcloud compute instances delete "$VM_NAME" --zone="$ZONE"
 ```
-
-## Tuning tips (Europe)
-
-- **Start conservative**:
-  - `SPLIT_GRID_N=auto`
-  - `TARGET_LEAF_BYTES=104857600` (100 MB)
-- If you see “too many open files” errors:
-  - lower `MAX_SPLIT_GRID_N`, or set `RAISE_NOFILE=65535`

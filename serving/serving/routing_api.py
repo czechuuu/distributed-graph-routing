@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import Dict, List
 
 from fastapi import FastAPI, HTTPException
@@ -106,7 +105,7 @@ def _route_same_shard(
 
     try:
         expand = _expand_path(
-            shard_id, start_resp.snapped.node_id, end_resp.snapped.node_id # we already have it expanded here
+            shard_id, start_resp.snapped.node_id, end_resp.snapped.node_id
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

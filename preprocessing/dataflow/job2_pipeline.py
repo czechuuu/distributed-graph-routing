@@ -3,7 +3,7 @@ import heapq
 import math
 import re
 from collections import defaultdict
-from typing import Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
+from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
 import pyarrow.parquet as pq
 from apache_beam.io import fileio
