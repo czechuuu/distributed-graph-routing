@@ -1,9 +1,6 @@
 """Tests for the routing API endpoints."""
 
-from unittest.mock import MagicMock, patch
 
-import pytest
-from fastapi.testclient import TestClient
 
 from serving.models import Coordinate, RouteRequest
 
@@ -14,7 +11,7 @@ class TestHealthEndpoint:
     def test_healthz_returns_ok(self):
         """Test that healthz endpoint returns ok status."""
         # Import app without triggering startup (which needs GCS)
-        from serving.routing_api import app, healthz
+        from serving.routing_api import healthz
         
         result = healthz()
         assert result == {"status": "ok"}

@@ -1,7 +1,7 @@
 [project]
 name = "preprocessing"
 version = "0.1.0"
-description = "Add your description here"
+description = "Dataflow pipelines for preprocessing OSM road networks into sharded graph data"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 from .dijkstra import Adjacency, reverse_adjacency
 from shared.protos import gcs_storage_pb2

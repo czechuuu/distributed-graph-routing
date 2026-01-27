@@ -18,11 +18,9 @@ Timeline:
 """
 
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.patches import FancyBboxPatch, FancyArrowPatch, ConnectionPatch
+from matplotlib.patches import FancyBboxPatch, ConnectionPatch
 from matplotlib.lines import Line2D
 import networkx as nx
-import numpy as np
 
 # Style configuration matching the pipeline diagram
 COLORS = {
@@ -287,9 +285,6 @@ def draw_overlay_graph(ax, nodes, bridge_edges, title):
         if u in boundary_nodes and v in boundary_nodes:
             x1, y1 = adjusted_nodes[u]
             x2, y2 = adjusted_nodes[v]
-            # Draw curved shortcut
-            mid_x = (x1 + x2) / 2
-            mid_y = (y1 + y2) / 2 + 0.25  # Curve upward
             ax.annotate('', xy=(x2, y2), xytext=(x1, y1),
                        arrowprops=dict(arrowstyle='->', color=COLORS['shortcut'],
                                       lw=2, ls='--', connectionstyle='arc3,rad=0.2'),

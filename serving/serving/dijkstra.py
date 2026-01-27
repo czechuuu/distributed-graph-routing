@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import heapq
 import math
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 Adjacency = Dict[int, List[Tuple[int, float]]]
 

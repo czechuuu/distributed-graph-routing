@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Iterable, Sequence
+from typing import Sequence
 
 
 def _score(key: str, node: str) -> int:

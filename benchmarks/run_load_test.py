@@ -168,7 +168,7 @@ def run_load_test(
             error=result.error,
         )
 
-    print(f"\nStarting load test:")
+    print("\nStarting load test:")
     print(f"  Concurrency: {concurrency}")
     print(f"  Total requests: {total_requests}")
     print(f"  Test case: {test_case.name}")
