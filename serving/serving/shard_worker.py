@@ -11,9 +11,7 @@ from .config import load_shard_worker_config
 from .dijkstra import dijkstra_path, dijkstra_targets
 from .gcs import download_shard
 from .shard_cache import ShardCache, ShardData, parse_shard
-from .storage_types import gcs_storage_pb2
-import shard_worker_pb2
-import shard_worker_pb2_grpc
+from shared.protos import gcs_storage_pb2, shard_worker_pb2, shard_worker_pb2_grpc
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
